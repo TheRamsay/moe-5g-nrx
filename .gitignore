@@ -1,5 +1,6 @@
 # .gitignore
 .venv/
+.metacentrum/
 __pycache__/
 *.pyc
 .DS_Store
@@ -12,3 +13,4 @@ checkpoints/
 *.pt
 *.pth
 data/
+results/

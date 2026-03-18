@@ -1,0 +1,12 @@
+name: static_dense_nrx
+family: static_dense
+
+backbone:
+    hidden_dim: 256
+    depth: 8
+    activation: gelu
+
+compute:
+    routing: dense
+    active_experts: 1
+    flops_penalty_alpha: 0.0
