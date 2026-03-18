@@ -1,0 +1,21 @@
+# @package _global_
+# Experiment 03: MoE with Hard Routing (Low Temperature)
+# Sharp routing decisions - more discrete expert selection
+
+defaults:
+  - override /model: moe
+
+model:
+  router:
+    temperature: 0.3
+
+training:
+  max_steps: 10000
+  batch_size: 32
+  learning_rate: 0.001
+
+logging:
+  use_wandb: true
+
+# Tags for wandb
+tags: [moe, hard_routing, low_temp]

@@ -1,0 +1,17 @@
+# @package _global_
+# Experiment 02: MoE with Default Settings
+# Balanced routing and compute
+
+defaults:
+  - override /model: moe
+
+training:
+  max_steps: 10000
+  batch_size: 32
+  learning_rate: 0.001
+
+logging:
+  use_wandb: true
+
+# Tags for wandb
+tags: [moe, default, balanced]
