@@ -124,7 +124,17 @@ There is no committed test suite yet.
 - Hydra output directories are disabled for now, so local runs stay clean
 ## Experiment Tracking with Weights & Biases
 
-Wandb is configured for offline mode on compute nodes (no internet) and synced later from frontends.
+Wandb is configured for standard online mode. Just login once and all runs sync automatically.
+
+### Setup
+
+```bash
+# Login to wandb once
+wandb login
+
+# Or set API key
+export WANDB_API_KEY=your-key-here
+```
 
 ### Configuration
 
@@ -141,7 +151,7 @@ uv run python main.py logging.entity=your-username
 
 ### MetaCentrum Workflow
 
-**1. Run training (offline mode automatically):**
+**1. Run training:**
 ```bash
 # Batch job
 qsub scripts/metacentrum_job.sh
@@ -152,18 +162,9 @@ run_experiment 'model=moe'
 exit
 ```
 
-**2. Sync results from frontend (with internet):**
-```bash
-# Sync all offline runs from results/
-./scripts/wandb_sync.sh
-
-# Or sync specific results directory
-./scripts/wandb_sync.sh results/123456.pbs-m1.metacentrum.cz
-```
-
-**3. View results:**
+**2. View results live:**
 - Go to https://wandb.ai/your-entity/moe-5g-nrx
-- Or run: `wandb sync --sync-all` from results directory
+- Watch metrics update in real-time as the job runs
 
 ### Wandb Environment Variables
 
@@ -182,4 +183,5 @@ export WANDB_NOTES="Testing MoE with 3 experts"
 - Metrics: Loss, learning rate, system metrics (GPU/CPU/memory)
 - Code: Source code snapshot (optional)
 - Hardware: PBS job ID, hostname, CUDA devices
+- Artifacts: Model checkpoints (if `logging.log_model=true`)
 - Artifacts: Model checkpoints (if `logging.log_model=true`)
