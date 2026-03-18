@@ -1,44 +1,68 @@
+"""Main entry point for training."""
+
 import os
-from collections.abc import Callable
-from typing import cast
 
 import hydra
-from omegaconf import DictConfig, OmegaConf
+import torch
+from omegaconf import DictConfig
+from torch.utils.data import DataLoader
 
-from src.utils.logging import finish_wandb, log_metrics, setup_wandb
+from src.data.dataset import NeuralReceiverDataset
+from src.training.trainer import Trainer
 
 os.environ["TF_USE_LEGACY_KERAS"] = "1"
 
 
 @hydra.main(config_path="conf", config_name="config", version_base=None)
 def main(cfg: DictConfig) -> None:
-    print(f"Loaded config: {cfg.model.name} ({cfg.model.family})")
-    print(OmegaConf.to_yaml(cfg, resolve=True))
+    """Main training function."""
+    print(f"Starting training: {cfg.model.name} ({cfg.model.family})")
 
-    # Setup wandb logging
+    # Set random seed
+    torch.manual_seed(cfg.runtime.seed)
+
+    # Get job ID if running on PBS
     job_id = os.environ.get("PBS_JOBID")
-    use_wandb = setup_wandb(cfg, job_id=job_id)
 
-    if use_wandb:
-        print(f"[INFO] Wandb initialized (offline={os.environ.get('WANDB_DIR', './wandb')})")
-    else:
-        print("[INFO] Wandb disabled or failed to initialize")
+    # Create dataset
+    print("[main] Creating dataset...")
+    dataset = NeuralReceiverDataset(
+        num_samples=cfg.training.max_steps * cfg.training.batch_size,
+        batch_size=cfg.training.batch_size,
+        num_rx_antennas=cfg.data.num_rx_antennas,
+    )
 
+    # Create dataloader
+    train_loader = DataLoader(
+        dataset,
+        batch_size=cfg.training.batch_size,
+        shuffle=True,
+        num_workers=0,  # Keep it simple for now
+    )
+
+    # Create trainer
+    print("[main] Initializing trainer...")
+    trainer = Trainer(cfg, job_id=job_id)
+
+    # Train
     try:
-        # TODO: Your actual training code goes here
-        # Example logging:
-        for step in range(5):
-            metrics = {
-                "loss": 1.0 / (step + 1),
-                "learning_rate": cfg.training.learning_rate,
-            }
-            log_metrics(metrics, step=step)
-            print(f"Step {step}: loss={metrics['loss']:.4f}")
+        trainer.train(train_loader, num_steps=cfg.training.max_steps)
+
+        # Save checkpoint
+        output_dir = os.environ.get("RUN_OUTPUT_DIR", "./outputs")
+        os.makedirs(output_dir, exist_ok=True)
+        checkpoint_path = os.path.join(output_dir, "final_checkpoint.pt")
+        trainer.save_checkpoint(checkpoint_path)
+
+        print("[main] Training completed successfully!")
+
+    except Exception as e:
+        print(f"[main] Training failed: {e}")
+        raise
 
     finally:
-        finish_wandb()
-        print("[INFO] Run complete")
+        trainer.cleanup()
 
 
 if __name__ == "__main__":
-    cast("Callable[[], None]", main)()
+    main()
