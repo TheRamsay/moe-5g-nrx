@@ -44,6 +44,8 @@ export XDG_CACHE_HOME="${SCRATCHDIR}/.cache"
 export MPLCONFIGDIR="${SCRATCHDIR}/.config/matplotlib"
 export WANDB_DIR="${ARTIFACT_DIR}/wandb"
 export WANDB_CACHE_DIR="${SCRATCHDIR}/.cache/wandb"
+export WANDB_MODE=offline  # Force offline mode on compute nodes
+export WANDB_SILENT=true   # Reduce wandb output noise
 export RUN_OUTPUT_DIR="${ARTIFACT_DIR}"
 export PYTHONUNBUFFERED=1
 

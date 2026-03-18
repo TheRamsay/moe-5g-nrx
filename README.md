@@ -122,4 +122,64 @@ There is no committed test suite yet.
   runtime configured (`DRJIT_LIBLLVM_PATH`) before ray-tracing features work
 - `main.py` sets `TF_USE_LEGACY_KERAS=1` before TensorFlow-family imports
 - Hydra output directories are disabled for now, so local runs stay clean
-- `wandb` is installed, but logging integration is not wired into training yet
+## Experiment Tracking with Weights & Biases
+
+Wandb is configured for offline mode on compute nodes (no internet) and synced later from frontends.
+
+### Configuration
+
+```bash
+# Disable wandb
+uv run python main.py wandb=disabled
+
+# Enable wandb (default)
+uv run python main.py wandb=default
+
+# Set your wandb entity (username or team)
+uv run python main.py logging.entity=your-username
+```
+
+### MetaCentrum Workflow
+
+**1. Run training (offline mode automatically):**
+```bash
+# Batch job
+qsub scripts/metacentrum_job.sh
+
+# Interactive job
+source scripts/interactive_env.sh
+run_experiment 'model=moe'
+exit
+```
+
+**2. Sync results from frontend (with internet):**
+```bash
+# Sync all offline runs from results/
+./scripts/wandb_sync.sh
+
+# Or sync specific results directory
+./scripts/wandb_sync.sh results/123456.pbs-m1.metacentrum.cz
+```
+
+**3. View results:**
+- Go to https://wandb.ai/your-entity/moe-5g-nrx
+- Or run: `wandb sync --sync-all` from results directory
+
+### Wandb Environment Variables
+
+Set these to customize behavior:
+
+```bash
+export WANDB_PROJECT=my-custom-project
+export WANDB_ENTITY=your-username
+export WANDB_TAGS="experiment-1,5g"
+export WANDB_NOTES="Testing MoE with 3 experts"
+```
+
+### What Gets Logged
+
+- Config: Full Hydra config with all hyperparameters
+- Metrics: Loss, learning rate, system metrics (GPU/CPU/memory)
+- Code: Source code snapshot (optional)
+- Hardware: PBS job ID, hostname, CUDA devices
+- Artifacts: Model checkpoints (if `logging.log_model=true`)

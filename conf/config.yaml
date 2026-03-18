@@ -1,5 +1,6 @@
 defaults:
     - model: static_dense
+    - wandb: default
     - override hydra/job_logging: disabled
     - override hydra/hydra_logging: disabled
     - _self_
