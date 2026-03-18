@@ -1,0 +1,16 @@
+[project]
+name = "moe-5g-nrx"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "matplotlib>=3.9.4",
+    "numpy>=1.26.4",
+    "sionna>=0.19.2",
+    "tensorflow>=2.15.1",
+    "tf-keras>=2.15.1",
+    "torch>=2.8.0",
+    "tqdm>=4.67.3",
+    "wandb>=0.25.1",
+]

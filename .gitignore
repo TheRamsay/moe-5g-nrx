@@ -1,0 +1,14 @@
+# .gitignore
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Weights & Biases local logs
+wandb/
+
+# Model checkpoints and data
+checkpoints/
+*.pt
+*.pth
+data/
