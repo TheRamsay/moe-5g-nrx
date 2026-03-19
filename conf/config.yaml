@@ -23,6 +23,12 @@ training:
     learning_rate: 0.001
     max_steps: 10000
 
+experiment:
+    batch_name: null  # Set via env var BATCH_NAME or override
+    exp_name: null    # Set via env var EXP_NAME or override
+    tags: []          # Additional tags for this experiment
+    notes: null       # Description/notes for this experiment
+
 logging:
     use_wandb: true
     log_every_n_steps: 50

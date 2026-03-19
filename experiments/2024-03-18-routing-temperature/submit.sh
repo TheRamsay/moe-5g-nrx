@@ -33,6 +33,8 @@ for exp_name in "${!experiments[@]}"; do
     job_id=$(qsub \
         -N "moe-$exp_name" \
         -v "RUN_ARGS=$params" \
+        -v "BATCH_NAME=routing-temperature-sweep" \
+        -v "EXP_NAME=$exp_name" \
         "$REPO_ROOT/scripts/metacentrum_job.sh" 2>&1 | grep -oP '^\d+' || echo "FAILED")
     
     if [ "$job_id" != "FAILED" ]; then
