@@ -12,5 +12,8 @@ wandb/
 checkpoints/
 *.pt
 *.pth
-data/
+/data/           # Data directory at repo root only
+*.h5
+*.hdf5
+*.tfrecord
 results/
