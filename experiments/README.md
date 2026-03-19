@@ -13,8 +13,8 @@ mkdir 2024-03-20-batch-name
 cd 2024-03-20-batch-name
 cp ../template.sh submit.sh
 
-# 3. Edit experiments
-vim experiments.yaml  # Define your parameter variations
+# 3. Create experiment configs in conf/experiment/
+#    e.g., conf/experiment/exp01_variant1.yaml
 
 # 4. Submit
 bash submit.sh
@@ -24,12 +24,15 @@ bash submit.sh
 
 ```
 experiments/
-├── README.md                       # This file
-├── 2024-03-18-routing-temperature/ # Example batch
-│   ├── README.md                   # What was tested, results
-│   ├── experiments.yaml            # Parameter definitions
-│   └── submit.sh                   # Submission script
-└── template.sh                     # Copy for new batches
+├── README.md                    # This file
+├── 2024-03-18-example/          # Example batch
+│   ├── README.md                # What was tested, results
+│   └── submit.sh                # Submission script
+└── template.sh                  # Copy for new batches
+
+conf/experiment/                 # Experiment configs
+├── exp01_baseline.yaml
+└── exp02_variant.yaml
 ```
 
 ## To Git or Not to Git?
@@ -53,4 +56,4 @@ experiments/
 
 ## Current Batches
 
-- `2024-03-18-routing-temperature/` - Testing router temperature (0.3, 1.0, 2.0)
+- `2024-03-18-example/` - Testing router temperature (0.3, 1.0, 2.0)

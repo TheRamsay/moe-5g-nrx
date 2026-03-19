@@ -1,0 +1,14 @@
+# @package _global_
+# Experiment 02: MoE Default
+
+defaults:
+  - override /model: moe
+
+experiment:
+  batch_name: example-batch
+  exp_name: exp02_moe
+  tags: [moe, default]
+  notes: "MoE with default settings"
+
+training:
+  max_steps: 10000

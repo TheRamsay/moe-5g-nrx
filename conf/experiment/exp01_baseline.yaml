@@ -1,0 +1,14 @@
+# @package _global_
+# Experiment 01: Baseline Dense Model
+
+defaults:
+  - override /model: static_dense
+
+experiment:
+  batch_name: example-batch
+  exp_name: exp01_baseline
+  tags: [baseline, dense]
+  notes: "Reference point - standard dense neural receiver"
+
+training:
+  max_steps: 10000

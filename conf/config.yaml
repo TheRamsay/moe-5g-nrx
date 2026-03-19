@@ -1,6 +1,7 @@
 defaults:
     - model: static_dense
     - wandb: default
+    - optional experiment: null
     - override hydra/job_logging: disabled
     - override hydra/hydra_logging: disabled
     - _self_
@@ -24,10 +25,10 @@ training:
     max_steps: 10000
 
 experiment:
-    batch_name: null  # Set via env var BATCH_NAME or override
-    exp_name: null    # Set via env var EXP_NAME or override
-    tags: []          # Additional tags for this experiment
-    notes: null       # Description/notes for this experiment
+    batch_name: null
+    exp_name: null
+    tags: []
+    notes: null
 
 logging:
     use_wandb: true

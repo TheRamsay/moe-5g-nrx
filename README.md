@@ -67,42 +67,39 @@ qdel <JOBID>
 # On compute node
 source scripts/interactive_env.sh
 run_experiment 'model=moe'
-sync_back   # Copy results
+sync_back
 exit
 ```
 
-## Experiment Batches
+## Experiments
 
 ```bash
-# Copy template batch
-cp -r experiments/2024-03-18-routing-temperature \
-     experiments/2024-03-19-your-batch
+# Copy template
+cp -r experiments/2024-03-18-example experiments/2024-03-19-your-batch
 
-# Edit and submit
-cd experiments/2024-03-19-your-batch
-vim experiments.yaml
+# Edit configs in conf/experiment/
+# Submit all
 bash submit.sh
 ```
 
-## Config
+## Hydra Config
+
+Configs live in `conf/`:
 
 ```bash
 # Switch model
 uv run python main.py model=static_dense
 uv run python main.py model=moe
 
-# Override values
-uv run python main.py model=moe \
-    model.router.temperature=0.5 \
-    training.batch_size=64 \
-    runtime.device=cuda
+# Override any value
+uv run python main.py model=moe training.batch_size=64
 ```
 
 Key files:
 - `conf/config.yaml` - Main config
 - `conf/model/static_dense.yaml` - Dense baseline
 - `conf/model/moe.yaml` - MoE model
-- `conf/wandb/default.yaml` - Logging
+- `conf/experiment/exp01.yaml` - Experiment variants
 
 ## Wandb
 
@@ -124,9 +121,8 @@ export WANDB_ENTITY=your-username
 
 ```
 results/
-├── <JOBID>/              # Each job
+├── <JOBID>/              # Job results
 │   ├── wandb/            # Logs
-│   ├── final_checkpoint.pt
 │   └── run.log
 └── interactive-*/        # Interactive sessions
 ```
@@ -137,15 +133,7 @@ results/
 ├── conf/              # Hydra configs
 ├── experiments/       # Experiment batches
 ├── scripts/           # HPC scripts
-├── src/               # Source code (TODO)
+├── src/               # Source code
 ├── main.py            # Entry point
 └── pyproject.toml     # Dependencies
 ```
-
-## Requirements
-
-- Python 3.10
-- uv
-- MetaCentrum account
-
-See `AGENTS.md` for architecture details.
