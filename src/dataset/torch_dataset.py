@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import torch
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, IterableDataset
 
 from .sionna_generator import SimulatorBatch, SionnaNRXSimulator, build_simulator_from_cfg
@@ -27,31 +27,53 @@ class NRXIterableDataset(IterableDataset[NRXBatch]):
 
     def __init__(
         self,
-        simulator: SionnaNRXSimulator,
+        simulator_cfg: dict[str, Any],
         batch_size: int,
         *,
         max_batches: int | None,
         base_seed: int | None,
     ) -> None:
         super().__init__()
-        self.simulator = simulator
+        self.simulator_cfg = simulator_cfg
         self.batch_size = batch_size
         self.max_batches = max_batches
         self.base_seed = base_seed
         self._iteration_index = 0
+        self._simulator: SionnaNRXSimulator | None = None
+
+    def _get_or_create_simulator(self) -> SionnaNRXSimulator:
+        if self._simulator is None:
+            cfg = OmegaConf.create(self.simulator_cfg)
+            self._simulator = build_simulator_from_cfg(cfg)
+        return self._simulator
 
     def __iter__(self) -> Iterator[NRXBatch]:
         worker = torch.utils.data.get_worker_info()
-        worker_offset = worker.id * 100_000 if worker is not None else 0
+        worker_id = worker.id if worker is not None else 0
+        num_workers = worker.num_workers if worker is not None else 1
+
+        simulator = self._get_or_create_simulator()
+
+        # Offset RNG streams by worker and iteration to avoid overlap.
+        worker_offset = worker_id * 100_000
+        iteration_offset = self._iteration_index * 1_000_000
         if self.base_seed is not None:
-            self.simulator.reseed(self.base_seed + worker_offset + self._iteration_index)
+            simulator.reseed(self.base_seed + worker_offset + iteration_offset)
         self._iteration_index += 1
 
-        produced = 0
-        while self.max_batches is None or produced < self.max_batches:
-            sim_batch = self.simulator.generate_batch(self.batch_size)
+        if self.max_batches is None:
+            while True:
+                sim_batch = simulator.generate_batch(self.batch_size)
+                yield self._to_torch(sim_batch)
+            return
+
+        # Shard global batch budget across workers: worker k produces
+        # indices k, k+num_workers, k+2*num_workers, ...
+        global_batch_idx = worker_id
+        while global_batch_idx < self.max_batches:
+            sim_batch = simulator.generate_batch(self.batch_size)
             yield self._to_torch(sim_batch)
-            produced += 1
+            global_batch_idx += num_workers
 
     def _to_torch(self, sim_batch: SimulatorBatch) -> NRXBatch:
         inputs = torch.from_numpy(sim_batch.resource_grid)
@@ -78,12 +100,15 @@ def _single_batch_collate(batch: NRXBatch | list[NRXBatch]) -> NRXBatch:
 def build_dataloader(cfg: DictConfig) -> DataLoader:
     """Instantiate the NRX dataloader from a Hydra config."""
 
-    simulator = build_simulator_from_cfg(cfg)
     batch_size = int(cfg.training.batch_size)
     max_batches_cfg = int(cfg.dataset.max_batches_per_epoch)
     max_batches = max_batches_cfg if max_batches_cfg > 0 else None
+    simulator_cfg = OmegaConf.to_container(cfg, resolve=True)
+    if not isinstance(simulator_cfg, dict):
+        raise TypeError("Resolved Hydra config must be a dictionary-like object.")
+
     dataset = NRXIterableDataset(
-        simulator,
+        simulator_cfg,
         batch_size=batch_size,
         max_batches=max_batches,
         base_seed=int(cfg.runtime.seed),
@@ -99,6 +124,8 @@ def build_dataloader(cfg: DictConfig) -> DataLoader:
     }
     if num_workers > 0:
         loader_kwargs["prefetch_factor"] = int(loader_cfg.prefetch_factor)
+        # TensorFlow state in Sionna workers is safer with spawn than fork.
+        loader_kwargs["multiprocessing_context"] = "spawn"
     return DataLoader(dataset, **loader_kwargs)
 
 
