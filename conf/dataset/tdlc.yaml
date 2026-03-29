@@ -1,0 +1,12 @@
+# TDL-C Channel Profile: 3GPP Tapped-Delay-Line with Clustering
+defaults:
+  - base
+
+name: tdlc
+channel_profile: tdlc
+snr_db:
+  min: -10.0
+  max: 20.0
+delay_spread_s: 5.0e-7
+min_speed_mps: 0.0
+max_speed_mps: 25.0
