@@ -10,7 +10,7 @@ import torch
 from omegaconf import DictConfig, open_dict
 from torch.utils.data import DataLoader
 
-from src.dataset import build_dataloader
+from src.data import build_dataloader
 from src.training import Trainer
 
 os.environ["TF_USE_LEGACY_KERAS"] = "1"

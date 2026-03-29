@@ -77,7 +77,7 @@ def _compute_statistics(batch: object) -> dict:
 
 
 def main() -> None:
-    from dataset import build_dataloader
+    from src.data import build_dataloader
 
     parser = argparse.ArgumentParser(description="Visualize and compare different dataset configurations")
     parser.add_argument(
