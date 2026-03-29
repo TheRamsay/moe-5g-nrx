@@ -17,6 +17,7 @@ class NRXBatch:
 
     inputs: torch.Tensor  # (batch, channels, freq, time)
     bit_labels: torch.Tensor  # (batch, bits_per_symbol, freq, time)
+    channel_target: torch.Tensor  # (batch, 2*num_rx_antennas, freq, time)
     snr_db: torch.Tensor  # (batch,)
     channel_profile: str
     modulation: str
@@ -78,11 +79,13 @@ class NRXIterableDataset(IterableDataset[NRXBatch]):
     def _to_torch(self, sim_batch: SimulatorBatch) -> NRXBatch:
         inputs = torch.from_numpy(sim_batch.resource_grid)
         bit_labels = torch.from_numpy(sim_batch.bit_labels)
+        channel_target = torch.from_numpy(sim_batch.channel_target)
         snr_db = torch.from_numpy(sim_batch.snr_db)
         metadata = sim_batch.metadata
         return NRXBatch(
             inputs=inputs,
             bit_labels=bit_labels,
+            channel_target=channel_target,
             snr_db=snr_db,
             channel_profile=metadata["channel_profile"],
             modulation=metadata["modulation"],

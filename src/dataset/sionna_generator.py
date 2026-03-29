@@ -50,6 +50,7 @@ class SimulatorBatch:
 
     resource_grid: np.ndarray  # (batch, channels, freq, time)
     bit_labels: np.ndarray  # (batch, bits_per_symbol, freq, time)
+    channel_target: np.ndarray  # (batch, 2*num_rx_antennas, freq, time)
     snr_db: np.ndarray  # (batch,)
     metadata: dict[str, Any]
 
@@ -120,6 +121,7 @@ class SionnaNRXSimulator:
         rx = channel * tx_symbols[:, None, :, :] + noise
         ls_estimate = self._estimate_channel_ls(rx, tx_symbols)
         resource_grid = self._compose_resource_grid(rx, ls_estimate)
+        channel_target = np.concatenate((channel.real, channel.imag), axis=1)
         batch_metadata = {
             "channel_profile": self.cfg.channel_profile.value,
             "modulation": self.cfg.modulation.value,
@@ -127,6 +129,7 @@ class SionnaNRXSimulator:
         return SimulatorBatch(
             resource_grid=resource_grid.astype(np.float32),
             bit_labels=bit_labels.astype(np.float32),
+            channel_target=channel_target.astype(np.float32),
             snr_db=snr_db,
             metadata=batch_metadata,
         )

@@ -6,10 +6,10 @@ from pathlib import Path
 from typing import Any
 
 import torch
+import wandb
 from omegaconf import OmegaConf
 from tqdm import tqdm
 
-import wandb
 from src.models import StaticDenseNRX
 from src.utils.logging import finish_wandb, log_metrics, setup_wandb
 
@@ -147,6 +147,9 @@ class Trainer:
 
         return StaticDenseNRX(
             input_channels=int(self.cfg.data.input_channels),
+            output_bits=int(self.cfg.data.bits_per_symbol)
+            * int(self.cfg.data.num_subcarriers)
+            * int(self.cfg.data.num_ofdm_symbols),
             state_dim=int(self.cfg.model.backbone.state_dim),
             num_cnn_blocks=int(self.cfg.model.backbone.num_cnn_blocks),
             stem_hidden_dims=list(self.cfg.model.backbone.stem_hidden_dims),
