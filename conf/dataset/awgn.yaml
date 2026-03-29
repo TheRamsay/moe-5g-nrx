@@ -1,0 +1,8 @@
+# AWGN Channel Profile: Additive White Gaussian Noise
+defaults:
+  - base
+name: awgn
+channel_profile: awgn
+snr_db:
+  min: 5.0
+  max: 35.0

@@ -1,0 +1,20 @@
+# UMa Channel Profile: 3GPP Urban Macro Scenario
+defaults:
+  - base
+
+name: uma
+channel_profile: uma
+
+snr_db:
+  min: -5.0
+  max: 25.0
+delay_spread_s: 3.0e-7
+min_speed_mps: 0.0
+max_speed_mps: 35.0
+
+uma_cell_radius_m: 500.0   # Macro cell coverage radius: 500 m
+bs_height_m: 25.0
+ut_height_m: 1.5
+indoor_probability: 0.2
+o2i_model: low             # Outdoor-to-indoor penetration loss: "low" (minimal)
+                           # (alternatives: "medium", "high" for denser obstruction)
