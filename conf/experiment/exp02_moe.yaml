@@ -5,10 +5,10 @@ defaults:
   - override /model: moe
 
 experiment:
-  batch_name: example-batch
-  exp_name: exp02_moe
-  tags: [moe, default]
-  notes: "MoE with default settings"
+  batch_name: moe-baseline-v1
+  exp_name: moe_default_bs32_lr1e3_s67
+  tags: [moe, synthetic, simo-1x4, 16qam]
+  notes: "Default MoE experiment on the synthetic PyTorch dataset."
 
 training:
   max_steps: 10000

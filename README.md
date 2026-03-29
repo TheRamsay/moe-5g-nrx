@@ -101,6 +101,34 @@ Key files:
 - `conf/model/moe.yaml` - MoE model
 - `conf/experiment/exp01.yaml` - Experiment variants
 
+## Run Naming
+
+Use three levels consistently in WandB and Hydra presets:
+
+- `project`: whole repo/workstream, keep `moe-5g-nrx`
+- `experiment.batch_name`: one study or sweep, e.g. `dense-baseline-v1`
+- `experiment.exp_name`: one exact run config, e.g. `dense_s56_b8_h48_bs32_lr1e3_s67`
+
+Recommended tags are broad filters only, for example:
+
+- `baseline`, `dense`, `synthetic`, `simo-1x4`, `16qam`
+
+Example:
+
+```bash
+uv run python main.py experiment=exp01_baseline
+```
+
+Capacity sweep presets:
+
+```bash
+uv run python main.py experiment=exp03_dense_capacity_small
+uv run python main.py experiment=exp04_dense_capacity_mid
+uv run python main.py experiment=exp05_dense_capacity_large
+```
+
+These three runs share the same WandB group `dense-capacity-v1` so they are easy to compare.
+
 ## Wandb
 
 ```bash

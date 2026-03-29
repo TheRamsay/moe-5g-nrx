@@ -1,0 +1,20 @@
+# @package _global_
+# Experiment 03: Dense Capacity Sweep - Small
+
+defaults:
+  - override /model: static_dense
+
+experiment:
+  batch_name: dense-capacity-v1
+  exp_name: dense_small_s56_b8_h32_bs32_lr1e3_s67
+  tags: [baseline, dense, capacity, synthetic, simo-1x4, 16qam]
+  notes: "Small dense baseline for the capacity sweep (~168k parameters)."
+
+model:
+  backbone:
+    stem_hidden_dims: [48, 48]
+    block_hidden_dim: 32
+    readout_hidden_dim: 96
+
+training:
+  max_steps: 10000

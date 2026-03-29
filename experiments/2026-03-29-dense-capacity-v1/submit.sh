@@ -4,17 +4,18 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-
 MODE="${1:-print}"
 
-# Replace these with the Hydra experiment presets used in this study.
 EXPERIMENTS=(
-  exp01_baseline
+  exp03_dense_capacity_small
+  exp04_dense_capacity_mid
+  exp05_dense_capacity_large
 )
 
 cd "$REPO_ROOT"
 
-echo "Study folder: $SCRIPT_DIR"
+echo "Dense capacity sweep v1"
+echo "Study dir: $SCRIPT_DIR"
 echo "Mode: $MODE"
 echo
 

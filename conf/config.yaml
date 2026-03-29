@@ -1,10 +1,10 @@
 defaults:
     - model: static_dense
     - wandb: default
+    - _self_
     - optional experiment: null
     - override hydra/job_logging: disabled
     - override hydra/hydra_logging: disabled
-    - _self_
 
 project:
     name: moe-5g-nrx
@@ -18,11 +18,22 @@ data:
     input_channels: 16
     num_rx_antennas: 4
     channel_estimator: ls
+    num_subcarriers: 128
+    num_ofdm_symbols: 14
+    bits_per_symbol: 4
+    train_samples: 65536
+    snr_db_range: [0.0, 24.0]
+    channel_estimator_noise_std: 0.15
+    channel_variation: 0.25
 
 training:
     batch_size: 32
     learning_rate: 0.001
+    weight_decay: 0.0001
+    gradient_clip_norm: 1.0
+    num_workers: 0
     max_steps: 10000
+    checkpoint_dir: checkpoints
 
 experiment:
     batch_name: null

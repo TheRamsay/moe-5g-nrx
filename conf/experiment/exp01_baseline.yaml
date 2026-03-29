@@ -5,10 +5,10 @@ defaults:
   - override /model: static_dense
 
 experiment:
-  batch_name: example-batch
-  exp_name: exp01_baseline
-  tags: [baseline, dense]
-  notes: "Reference point - standard dense neural receiver"
+  batch_name: dense-baseline-v1
+  exp_name: dense_s56_b8_h48_bs32_lr1e3_s67
+  tags: [baseline, dense, synthetic, simo-1x4, 16qam]
+  notes: "Static dense single-user SIMO baseline on the synthetic PyTorch dataset."
 
 training:
   max_steps: 10000

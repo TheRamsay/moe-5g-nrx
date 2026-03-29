@@ -1,0 +1,101 @@
+# Experiment: Dense Capacity Sweep v1
+
+**Date:** 2026-03-29  
+**Question:** What dense baseline capacity is strong enough without being unnecessarily large?  
+**WandB group:** `dense-capacity-v1`
+
+## Motivation
+
+We now have a fixed single-user SIMO dense receiver family in `src/models/dense.py`.
+Before comparing against MoE, we need to know whether the dense baseline is underpowered, reasonably sized, or oversized.
+
+This study keeps the architecture family fixed and changes only model capacity.
+
+`exp01_baseline` remains the canonical standalone dense baseline preset. The `mid`
+run in this sweep lives in the `dense-capacity-v1` group so it can be compared
+directly against `small` and `large` within one study.
+
+## Selection Rule
+
+Choose the smallest dense model that is close to the best performer.
+
+- early-stage comparison: `train/ber`, `train/ser`, `train/block_bit_errors_mean`
+- later, after validation is added: `val/ber` becomes the main selection metric
+- if two models are very close, prefer the smaller one
+
+## Runs in This Study
+
+| Config | WandB run | Params | Notes |
+|---|---|---:|---|
+| `exp03_dense_capacity_small` | `dense_small_s56_b8_h32_bs32_lr1e3_s67` | ~168k | Small baseline |
+| `exp04_dense_capacity_mid` | `dense_mid_s56_b8_h48_bs32_lr1e3_s67` | ~306k | Mid-capacity sweep run |
+| `exp05_dense_capacity_large` | `dense_large_s56_b8_h64_bs32_lr1e3_s67` | ~450k | Larger dense baseline |
+
+## What Is Fixed
+
+- model family: static dense CNN
+- state depth: `56`
+- number of residual blocks: `8`
+- batch size: `32`
+- learning rate: `1e-3`
+- seed: `67`
+- dataset: current synthetic PyTorch generator
+- training budget: currently `10k` steps unless overridden
+
+## Quick Start
+
+From the repository root:
+
+```bash
+uv run python main.py experiment=exp03_dense_capacity_small
+uv run python main.py experiment=exp04_dense_capacity_mid
+uv run python main.py experiment=exp05_dense_capacity_large
+```
+
+Or from this folder:
+
+```bash
+bash submit.sh print
+bash submit.sh local
+```
+
+## Suggested First Pass
+
+Run shorter smoke comparisons before the full `10k`-step sweep:
+
+```bash
+uv run python main.py experiment=exp03_dense_capacity_small training.max_steps=1000
+uv run python main.py experiment=exp04_dense_capacity_mid training.max_steps=1000
+uv run python main.py experiment=exp05_dense_capacity_large training.max_steps=1000
+```
+
+Then inspect the WandB group and compare:
+
+- `train/ber`
+- `train/ser`
+- `train/block_bit_errors_mean`
+- `train/loss`
+
+## Current Status
+
+- dense model family is implemented and trains successfully
+- WandB naming/grouping is now clean
+- training metrics include BER, SER, BLER, and per-block bit-error summaries
+- validation is not implemented yet, so current comparisons are still train-side only
+
+## Results
+
+| Config | Status | Best metric seen | Notes |
+|---|---|---|---|
+| `exp03_dense_capacity_small` | pending | - | |
+| `exp04_dense_capacity_mid` | pending | - | |
+| `exp05_dense_capacity_large` | pending | - | |
+
+## Next Step After This Study
+
+After selecting the best size region:
+
+1. add validation
+2. sweep learning rate on the chosen capacity
+3. rerun the best dense setup across multiple seeds
+4. freeze the final dense baseline before MoE comparison

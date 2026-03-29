@@ -2,11 +2,18 @@ name: static_dense_nrx
 family: static_dense
 
 backbone:
-    hidden_dim: 256
-    depth: 8
-    activation: gelu
+    variant: paper_cnn_simo
+    state_dim: 56
+    num_cnn_blocks: 8
+    stem_hidden_dims: [64, 64]
+    block_hidden_dim: 48
+    readout_hidden_dim: 128
+    activation: relu
+    pilot_symbol_indices: [2, 11]
+    pilot_subcarrier_spacing: 2
 
 compute:
     routing: dense
     active_experts: 1
     flops_penalty_alpha: 0.0
+    channel_loss_weight: 0.05

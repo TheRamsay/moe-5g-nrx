@@ -1,0 +1,20 @@
+# @package _global_
+# Experiment 04: Dense Capacity Sweep - Mid
+
+defaults:
+  - override /model: static_dense
+
+experiment:
+  batch_name: dense-capacity-v1
+  exp_name: dense_mid_s56_b8_h48_bs32_lr1e3_s67
+  tags: [baseline, dense, capacity, synthetic, simo-1x4, 16qam]
+  notes: "Mid-capacity dense baseline for the capacity sweep (~306k parameters)."
+
+model:
+  backbone:
+    stem_hidden_dims: [64, 64]
+    block_hidden_dim: 48
+    readout_hidden_dim: 128
+
+training:
+  max_steps: 10000
