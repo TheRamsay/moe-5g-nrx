@@ -44,9 +44,14 @@ validation:
     max_samples: null
 
 evaluation:
-    dataset_path: data/test/mixed.pt
+    checkpoint: checkpoints/static_dense_nrx.pt
+    dataset_path: data/test/tdlc.pt
     batch_size: 64
     max_samples: null
+    all_profiles: true
+    snr_bins: null
+    device: ${runtime.device}
+    data_dir: data/test
 
 experiment:
     batch_name: null

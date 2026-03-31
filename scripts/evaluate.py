@@ -1,33 +1,18 @@
 #!/usr/bin/env python
-"""Evaluate a trained model on test datasets.
 
-Usage:
-    # Evaluate on default test dataset
-    python scripts/evaluate.py --checkpoint checkpoints/static_dense.pt
-
-    # Evaluate on specific test dataset
-    python scripts/evaluate.py --checkpoint checkpoints/model.pt --dataset data/test/uma.pt
-
-    # Evaluate on all test profiles
-    python scripts/evaluate.py --checkpoint checkpoints/model.pt --all-profiles
-
-    # Detailed SNR-binned analysis
-    python scripts/evaluate.py --checkpoint checkpoints/model.pt --snr-bins 5
-"""
 
 from __future__ import annotations
 
-import argparse
 import sys
 from pathlib import Path
 from typing import Any
 
+import hydra
 import numpy as np
 import torch
+from hydra.utils import to_absolute_path
+from omegaconf import DictConfig
 from tqdm import tqdm
-
-from src.data import CachedNRXBatch, build_cached_dataloader
-from src.models import StaticDenseNRX
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src"
@@ -35,6 +20,9 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.data import CachedNRXBatch, build_cached_dataloader  # noqa: E402
+from src.models import StaticDenseNRX  # noqa: E402
 
 
 def load_checkpoint(checkpoint_path: Path, device: torch.device) -> tuple[torch.nn.Module, dict[str, Any]]:
@@ -224,81 +212,44 @@ def print_results(results: dict[str, Any], dataset_name: str) -> None:
             )
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Evaluate a trained model on test datasets",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--checkpoint",
-        type=Path,
-        required=True,
-        help="Path to model checkpoint (.pt file)",
-    )
-    parser.add_argument(
-        "--dataset",
-        type=Path,
-        default=None,
-        help="Path to test dataset (default: from config evaluation.dataset_path)",
-    )
-    parser.add_argument(
-        "--all-profiles",
-        action="store_true",
-        help="Evaluate on all test profiles (uma, tdlc, mixed)",
-    )
-    parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=64,
-        help="Batch size for evaluation (default: 64)",
-    )
-    parser.add_argument(
-        "--snr-bins",
-        type=int,
-        default=None,
-        help="Number of SNR bins for detailed analysis (default: None)",
-    )
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="cpu",
-        help="Device to run evaluation on (default: cpu)",
-    )
-    parser.add_argument(
-        "--data-dir",
-        type=Path,
-        default=PROJECT_ROOT / "data" / "test",
-        help="Directory containing test datasets (for --all-profiles)",
-    )
+@hydra.main(config_path="../conf", config_name="config", version_base=None)
+def main(cfg: DictConfig) -> None:
+    eval_cfg = cfg.evaluation
+    checkpoint_raw = eval_cfg.get("checkpoint")
+    if checkpoint_raw is None:
+        print("[ERROR] Missing evaluation.checkpoint in Hydra config")
+        sys.exit(1)
 
-    args = parser.parse_args()
+    checkpoint_path = Path(to_absolute_path(str(checkpoint_raw)))
+    requested_device = str(eval_cfg.get("device", cfg.runtime.device))
 
     # Resolve device
-    device = torch.device(args.device)
-    if args.device.startswith("cuda") and not torch.cuda.is_available():
+    device = torch.device(requested_device)
+    if requested_device.startswith("cuda") and not torch.cuda.is_available():
         print("[WARNING] CUDA requested but not available, falling back to CPU")
         device = torch.device("cpu")
 
     # Load model
-    print(f"Loading checkpoint: {args.checkpoint}")
-    if not args.checkpoint.exists():
-        print(f"[ERROR] Checkpoint not found: {args.checkpoint}")
+    print(f"Loading checkpoint: {checkpoint_path}")
+    if not checkpoint_path.exists():
+        print(f"[ERROR] Checkpoint not found: {checkpoint_path}")
         sys.exit(1)
 
-    model, config = load_checkpoint(args.checkpoint, device)
+    model, config = load_checkpoint(checkpoint_path, device)
     bits_per_symbol = int(config["data"]["bits_per_symbol"])
     print(f"  Model: {config['model']['name']}")
-    print(f"  Global step: {torch.load(args.checkpoint, weights_only=False)['global_step']}")
+    print(f"  Global step: {torch.load(checkpoint_path, weights_only=False)['global_step']}")
 
     # Determine datasets to evaluate
-    if args.all_profiles:
+    if bool(eval_cfg.get("all_profiles", False)):
         profiles = ["uma", "tdlc", "mixed"]
-        datasets = [(p, args.data_dir / f"{p}.pt") for p in profiles]
-    elif args.dataset is not None:
-        datasets = [(args.dataset.stem, args.dataset)]
+        data_dir = Path(to_absolute_path(str(eval_cfg.get("data_dir", PROJECT_ROOT / "data" / "test"))))
+        datasets = [(p, data_dir / f"{p}.pt") for p in profiles]
     else:
-        # Use default from config
-        default_path = Path(config.get("evaluation", {}).get("dataset_path", "data/test/mixed.pt"))
+        default_dataset = eval_cfg.get("dataset_path")
+        if default_dataset is None:
+            default_dataset = config.get("evaluation", {}).get("dataset_path", "data/test/mixed.pt")
+        default_path = Path(to_absolute_path(str(default_dataset)))
         datasets = [(default_path.stem, default_path)]
 
     # Evaluate each dataset
@@ -311,7 +262,7 @@ def main() -> None:
         print(f"\nLoading dataset: {path}")
         dataloader = build_cached_dataloader(
             path=path,
-            batch_size=args.batch_size,
+            batch_size=int(eval_cfg.batch_size),
             shuffle=False,
         )
 
@@ -320,7 +271,7 @@ def main() -> None:
             dataloader=dataloader,
             device=device,
             bits_per_symbol=bits_per_symbol,
-            snr_bins=args.snr_bins,
+            snr_bins=int(eval_cfg.snr_bins) if eval_cfg.snr_bins is not None else None,
         )
         all_results[name] = results
         print_results(results, name)
