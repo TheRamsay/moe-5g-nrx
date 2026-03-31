@@ -138,10 +138,13 @@ Training data is generated dynamically via Sionna. For reproducible evaluation, 
 uv run python scripts/generate_datasets.py
 
 # Generate only validation sets
-uv run python scripts/generate_datasets.py --split val
+uv run python scripts/generate_datasets.py generation.split=val
 
 # Custom sample count
-uv run python scripts/generate_datasets.py --num-samples 16384
+uv run python scripts/generate_datasets.py generation.num_samples=16384
+
+# Custom output directory
+uv run python scripts/generate_datasets.py generation.output_dir=data2
 ```
 
 Datasets are saved to `data/val/` and `data/test/` (gitignored).

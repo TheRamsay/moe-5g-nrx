@@ -54,8 +54,17 @@ experiment:
     tags: []
     notes: null
 
+generation:
+    output_dir: data
+    num_samples: 32768
+    batch_size: 64
+    split: both          # val | test | both
+    profiles: [tdlc, uma]
+    include_mixed: true
+    base_seed: 67
+
 logging:
-    use_wandb: false
+    use_wandb: true
     log_every_n_steps: 50
 
 hydra:

@@ -1,31 +1,18 @@
 #!/usr/bin/env python
-"""Generate cached validation and test datasets for neural receiver evaluation.
 
-Usage:
-    # Generate all datasets (val + test for UMa, TDL-C, and mixed)
-    python scripts/generate_datasets.py
-
-    # Generate only validation datasets
-    python scripts/generate_datasets.py --split val
-
-    # Generate for specific profiles
-    python scripts/generate_datasets.py --profiles uma tdlc
-
-    # Custom output directory and sample count
-    python scripts/generate_datasets.py --output-dir ./my_data --num-samples 16384
-"""
 
 from __future__ import annotations
 
-import argparse
+import gc
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import hydra
 import numpy as np
 import torch
-from hydra import compose, initialize_config_dir
+from hydra import compose
 from omegaconf import DictConfig, open_dict
 from tqdm import tqdm
 
@@ -40,23 +27,18 @@ if str(PROJECT_ROOT) not in sys.path:
 VAL_SEED_OFFSET = 1_000_000
 TEST_SEED_OFFSET = 2_000_000
 
-# Only realistic channel models (no AWGN)
-SUPPORTED_PROFILES = ["uma", "tdlc"]
-
 
 def build_config(profile: str, batch_size: int, seed: int) -> DictConfig:
     """Build Hydra config for a specific channel profile."""
-    conf_dir = str(PROJECT_ROOT / "conf")
-    with initialize_config_dir(config_dir=conf_dir, version_base=None):
-        cfg = compose(
-            config_name="config",
-            overrides=[
-                f"dataset={profile}",
-                f"training.batch_size={batch_size}",
-                f"runtime.seed={seed}",
-                "dataset.diagnostics.sample_preview=false",
-            ],
-        )
+    cfg = compose(
+        config_name="config",
+        overrides=[
+            f"dataset={profile}",
+            f"training.batch_size={batch_size}",
+            f"runtime.seed={seed}",
+            "dataset.diagnostics.sample_preview=false",
+        ],
+    )
     return cfg
 
 
@@ -81,12 +63,15 @@ def generate_dataset(
     """
     from src.data import build_dataloader
 
+    num_batches = (num_samples + batch_size - 1) // batch_size
     cfg = build_config(profile, batch_size, seed)
 
     # Update config to sync dimensions
     with open_dict(cfg):
         cfg.data.num_subcarriers = int(cfg.dataset.num_subcarriers)
         cfg.data.num_ofdm_symbols = int(cfg.dataset.num_ofdm_symbols)
+        # Dataloader uses this as a hard stop; raise it to satisfy requested samples.
+        cfg.dataset.max_batches_per_epoch = int(num_batches)
 
     dataloader = build_dataloader(cfg)
 
@@ -95,7 +80,6 @@ def generate_dataset(
     channel_target_list: list[torch.Tensor] = []
     snr_db_list: list[torch.Tensor] = []
 
-    num_batches = (num_samples + batch_size - 1) // batch_size
     collected = 0
 
     progress_desc = desc or f"Generating {profile}"
@@ -245,124 +229,102 @@ def save_dataset(data: dict[str, Any], output_path: Path) -> None:
     print(f"  Saved: {output_path} ({size_mb:.1f} MB, {data['metadata']['num_samples']} samples)")
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Generate cached validation and test datasets",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=PROJECT_ROOT / "data",
-        help="Output directory for generated datasets (default: ./data)",
-    )
-    parser.add_argument(
-        "--num-samples",
-        type=int,
-        default=32768,
-        help="Number of samples per dataset (default: 32768)",
-    )
-    parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=256,
-        help="Batch size for generation (default: 256)",
-    )
-    parser.add_argument(
-        "--split",
-        choices=["val", "test", "both"],
-        default="both",
-        help="Which split(s) to generate (default: both)",
-    )
-    parser.add_argument(
-        "--profiles",
-        nargs="+",
-        choices=SUPPORTED_PROFILES,
-        default=SUPPORTED_PROFILES,
-        help=f"Channel profiles to generate (default: all = {SUPPORTED_PROFILES})",
-    )
-    parser.add_argument(
-        "--include-mixed",
-        action="store_true",
-        default=True,
-        help="Also generate mixed-profile datasets (default: True)",
-    )
-    parser.add_argument(
-        "--no-mixed",
-        action="store_false",
-        dest="include_mixed",
-        help="Skip mixed-profile dataset generation",
-    )
-    parser.add_argument(
-        "--base-seed",
-        type=int,
-        default=67,
-        help="Base random seed (default: 67, matching config.yaml)",
-    )
+def _resolve_split(split: str) -> list[tuple[str, int]]:
+    split_normalized = split.lower()
+    if split_normalized == "val":
+        return [("val", VAL_SEED_OFFSET)]
+    if split_normalized == "test":
+        return [("test", TEST_SEED_OFFSET)]
+    if split_normalized == "both":
+        return [("val", VAL_SEED_OFFSET), ("test", TEST_SEED_OFFSET)]
+    raise ValueError(f"Invalid split '{split}'. Expected one of: val, test, both")
 
-    args = parser.parse_args()
 
-    splits_to_generate = []
-    if args.split in ("val", "both"):
-        splits_to_generate.append(("val", VAL_SEED_OFFSET))
-    if args.split in ("test", "both"):
-        splits_to_generate.append(("test", TEST_SEED_OFFSET))
+@hydra.main(config_path="../conf", config_name="config", version_base=None)
+def main(cfg: DictConfig) -> None:
+    generation_cfg = cfg.generation
+
+    output_dir = Path(str(generation_cfg.output_dir))
+    if not output_dir.is_absolute():
+        output_dir = PROJECT_ROOT / output_dir
+
+    num_samples = int(generation_cfg.num_samples)
+    batch_size = int(generation_cfg.batch_size)
+    split = str(generation_cfg.split)
+    profiles = list(generation_cfg.profiles)
+    include_mixed = bool(generation_cfg.include_mixed)
+    base_seed = int(generation_cfg.base_seed)
+
+    if num_samples <= 0:
+        raise ValueError("generation.num_samples must be > 0")
+    if batch_size <= 0:
+        raise ValueError("generation.batch_size must be > 0")
+
+    splits_to_generate = _resolve_split(split)
 
     print("=" * 60)
     print("Dataset Generation Configuration")
     print("=" * 60)
-    print(f"  Output directory: {args.output_dir}")
-    print(f"  Samples per dataset: {args.num_samples}")
-    print(f"  Batch size: {args.batch_size}")
+    print(f"  Output directory: {output_dir}")
+    print(f"  Samples per dataset: {num_samples}")
+    print(f"  Batch size: {batch_size}")
     print(f"  Splits: {[s[0] for s in splits_to_generate]}")
-    print(f"  Profiles: {args.profiles}")
-    print(f"  Include mixed: {args.include_mixed}")
-    print(f"  Base seed: {args.base_seed}")
+    print(f"  Profiles: {profiles}")
+    print(f"  Include mixed: {include_mixed}")
+    print(f"  Base seed: {base_seed}")
     print("=" * 60)
 
     for split_name, seed_offset in splits_to_generate:
-        split_dir = args.output_dir / split_name
-        split_seed = args.base_seed + seed_offset
+        split_dir = output_dir / split_name
+        split_seed = base_seed + seed_offset
 
         print(f"\n{'=' * 60}")
         print(f"Generating {split_name.upper()} datasets (seed offset: {seed_offset})")
         print(f"{'=' * 60}")
 
         # Generate per-profile datasets
-        for profile in args.profiles:
-            profile_seed = split_seed + SUPPORTED_PROFILES.index(profile) * 10_000
+        for profile in profiles:
+            profile_seed = split_seed + sorted(profiles).index(profile) * 10_000
             print(f"\n[{split_name}/{profile}] Seed: {profile_seed}")
 
             data = generate_dataset(
                 profile=profile,
-                num_samples=args.num_samples,
-                batch_size=args.batch_size,
+                num_samples=num_samples,
+                batch_size=batch_size,
                 seed=profile_seed,
                 desc=f"{split_name}/{profile}",
             )
             save_dataset(data, split_dir / f"{profile}.pt")
+            del data
+            gc.collect()  # Free memory after each profile
 
         # Generate mixed dataset
-        if args.include_mixed and len(args.profiles) > 1:
+        if include_mixed and len(profiles) > 1:
             mixed_seed = split_seed + 90_000
             print(f"\n[{split_name}/mixed] Seed: {mixed_seed}")
 
             data = generate_mixed_dataset(
-                profiles=args.profiles,
-                num_samples=args.num_samples,
-                batch_size=args.batch_size,
+                profiles=profiles,
+                num_samples=num_samples,
+                batch_size=batch_size,
                 seed=mixed_seed,
                 desc=f"{split_name}/mixed",
             )
             save_dataset(data, split_dir / "mixed.pt")
+            del data
+            gc.collect()
 
     print(f"\n{'=' * 60}")
     print("Generation complete!")
     print(f"{'=' * 60}")
-    print(f"\nDatasets saved to: {args.output_dir}")
+    print(f"\nDatasets saved to: {output_dir}")
     print("\nTo use in training, update config.yaml:")
-    print(f"  validation.dataset_path: {args.output_dir}/val/mixed.pt")
-    print(f"  evaluation.dataset_path: {args.output_dir}/test/mixed.pt")
+    suggested_name = "mixed.pt" if include_mixed and len(profiles) > 1 else f"{profiles[0]}.pt"
+    generated_splits = {name for name, _ in splits_to_generate}
+    if "val" in generated_splits:
+        print(f"  validation.dataset_path: {output_dir}/val/{suggested_name}")
+    if "test" in generated_splits:
+        print(f"  evaluation.dataset_path: {output_dir}/test/{suggested_name}")
 
 
 if __name__ == "__main__":
