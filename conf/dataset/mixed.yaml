@@ -1,0 +1,27 @@
+# Mixed Channel Profile: Alternating UMa and TDL-C for robust training
+# This config is used for training that generalizes across channel conditions.
+defaults:
+  - base
+
+name: mixed
+channel_profile: mixed
+
+snr_db:
+  min: -10.0
+  max: 25.0
+
+# Use TDL-C delay spread (more challenging)
+delay_spread_s: 5.0e-7
+min_speed_mps: 0.0
+max_speed_mps: 30.0
+
+# UMa-specific parameters
+uma_cell_radius_m: 500.0
+bs_height_m: 25.0
+ut_height_m: 1.5
+indoor_probability: 0.2
+o2i_model: low
+
+mixed:
+  profiles: ["uma", "tdlc"]
+  strategy: "alternate"       # "alternate" = switch per batch, "random" = random per batch

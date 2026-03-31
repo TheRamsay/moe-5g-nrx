@@ -1,0 +1,369 @@
+#!/usr/bin/env python
+"""Generate cached validation and test datasets for neural receiver evaluation.
+
+Usage:
+    # Generate all datasets (val + test for UMa, TDL-C, and mixed)
+    python scripts/generate_datasets.py
+
+    # Generate only validation datasets
+    python scripts/generate_datasets.py --split val
+
+    # Generate for specific profiles
+    python scripts/generate_datasets.py --profiles uma tdlc
+
+    # Custom output directory and sample count
+    python scripts/generate_datasets.py --output-dir ./my_data --num-samples 16384
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import torch
+from hydra import compose, initialize_config_dir
+from omegaconf import DictConfig, open_dict
+from tqdm import tqdm
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_ROOT = PROJECT_ROOT / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+# Seed offsets to ensure no overlap with training data
+VAL_SEED_OFFSET = 1_000_000
+TEST_SEED_OFFSET = 2_000_000
+
+# Only realistic channel models (no AWGN)
+SUPPORTED_PROFILES = ["uma", "tdlc"]
+
+
+def build_config(profile: str, batch_size: int, seed: int) -> DictConfig:
+    """Build Hydra config for a specific channel profile."""
+    conf_dir = str(PROJECT_ROOT / "conf")
+    with initialize_config_dir(config_dir=conf_dir, version_base=None):
+        cfg = compose(
+            config_name="config",
+            overrides=[
+                f"dataset={profile}",
+                f"training.batch_size={batch_size}",
+                f"runtime.seed={seed}",
+                "dataset.diagnostics.sample_preview=false",
+            ],
+        )
+    return cfg
+
+
+def generate_dataset(
+    profile: str,
+    num_samples: int,
+    batch_size: int,
+    seed: int,
+    desc: str = "",
+) -> dict[str, Any]:
+    """Generate a dataset for a single channel profile.
+
+    Args:
+        profile: Channel profile name (awgn, uma, tdlc).
+        num_samples: Total number of samples to generate.
+        batch_size: Batch size for generation.
+        seed: Random seed for reproducibility.
+        desc: Description for progress bar.
+
+    Returns:
+        Dictionary with tensors and metadata ready for saving.
+    """
+    from src.data import build_dataloader
+
+    cfg = build_config(profile, batch_size, seed)
+
+    # Update config to sync dimensions
+    with open_dict(cfg):
+        cfg.data.num_subcarriers = int(cfg.dataset.num_subcarriers)
+        cfg.data.num_ofdm_symbols = int(cfg.dataset.num_ofdm_symbols)
+
+    dataloader = build_dataloader(cfg)
+
+    inputs_list: list[torch.Tensor] = []
+    bit_labels_list: list[torch.Tensor] = []
+    channel_target_list: list[torch.Tensor] = []
+    snr_db_list: list[torch.Tensor] = []
+
+    num_batches = (num_samples + batch_size - 1) // batch_size
+    collected = 0
+
+    progress_desc = desc or f"Generating {profile}"
+    with tqdm(total=num_samples, desc=progress_desc, unit="samples") as pbar:
+        for batch_idx, batch in enumerate(dataloader):
+            if batch_idx >= num_batches:
+                break
+
+            # Determine how many samples to take from this batch
+            remaining = num_samples - collected
+            take = min(batch_size, remaining)
+
+            inputs_list.append(batch.inputs[:take])
+            bit_labels_list.append(batch.bit_labels[:take])
+            channel_target_list.append(batch.channel_target[:take])
+            snr_db_list.append(batch.snr_db[:take])
+
+            collected += take
+            pbar.update(take)
+
+            if collected >= num_samples:
+                break
+
+    # Concatenate all batches
+    inputs = torch.cat(inputs_list, dim=0)
+    bit_labels = torch.cat(bit_labels_list, dim=0)
+    channel_target = torch.cat(channel_target_list, dim=0)
+    snr_db = torch.cat(snr_db_list, dim=0)
+
+    # Build metadata
+    simulator_config = {
+        "num_subcarriers": int(cfg.dataset.num_subcarriers),
+        "num_ofdm_symbols": int(cfg.dataset.num_ofdm_symbols),
+        "snr_db_min": float(cfg.dataset.snr_db.min),
+        "snr_db_max": float(cfg.dataset.snr_db.max),
+        "modulation": str(cfg.dataset.modulation),
+        "channel_profile": str(cfg.dataset.channel_profile),
+    }
+
+    metadata = {
+        "channel_profile": profile,
+        "modulation": str(cfg.dataset.modulation),
+        "num_samples": int(inputs.shape[0]),
+        "seed": seed,
+        "generation_timestamp": datetime.now(timezone.utc).isoformat(),
+        "simulator_config": simulator_config,
+    }
+
+    return {
+        "inputs": inputs,
+        "bit_labels": bit_labels,
+        "channel_target": channel_target,
+        "snr_db": snr_db,
+        "metadata": metadata,
+    }
+
+
+def generate_mixed_dataset(
+    profiles: list[str],
+    num_samples: int,
+    batch_size: int,
+    seed: int,
+    desc: str = "",
+) -> dict[str, Any]:
+    """Generate a mixed dataset sampling equally from all profiles.
+
+    Args:
+        profiles: List of channel profiles to include.
+        num_samples: Total number of samples in the mixed dataset.
+        batch_size: Batch size for generation.
+        seed: Base random seed.
+        desc: Description for progress bar.
+
+    Returns:
+        Dictionary with tensors and metadata ready for saving.
+    """
+    samples_per_profile = num_samples // len(profiles)
+    remainder = num_samples % len(profiles)
+
+    all_inputs: list[torch.Tensor] = []
+    all_bit_labels: list[torch.Tensor] = []
+    all_channel_target: list[torch.Tensor] = []
+    all_snr_db: list[torch.Tensor] = []
+    profile_configs: dict[str, dict[str, Any]] = {}
+
+    for i, profile in enumerate(profiles):
+        # Distribute remainder samples across first profiles
+        profile_samples = samples_per_profile + (1 if i < remainder else 0)
+        profile_seed = seed + i * 100_000
+
+        progress_desc = f"{desc} [{profile}]" if desc else f"Mixed [{profile}]"
+        data = generate_dataset(
+            profile=profile,
+            num_samples=profile_samples,
+            batch_size=batch_size,
+            seed=profile_seed,
+            desc=progress_desc,
+        )
+
+        all_inputs.append(data["inputs"])
+        all_bit_labels.append(data["bit_labels"])
+        all_channel_target.append(data["channel_target"])
+        all_snr_db.append(data["snr_db"])
+        profile_configs[profile] = data["metadata"]["simulator_config"]
+
+    # Concatenate and shuffle
+    inputs = torch.cat(all_inputs, dim=0)
+    bit_labels = torch.cat(all_bit_labels, dim=0)
+    channel_target = torch.cat(all_channel_target, dim=0)
+    snr_db = torch.cat(all_snr_db, dim=0)
+
+    # Shuffle with fixed seed for reproducibility
+    rng = np.random.default_rng(seed)
+    perm = rng.permutation(len(inputs))
+    perm_tensor = torch.from_numpy(perm)
+
+    inputs = inputs[perm_tensor]
+    bit_labels = bit_labels[perm_tensor]
+    channel_target = channel_target[perm_tensor]
+    snr_db = snr_db[perm_tensor]
+
+    metadata = {
+        "channel_profile": "mixed",
+        "modulation": "qam16",
+        "num_samples": int(inputs.shape[0]),
+        "seed": seed,
+        "generation_timestamp": datetime.now(timezone.utc).isoformat(),
+        "profiles_included": profiles,
+        "samples_per_profile": samples_per_profile,
+        "profile_configs": profile_configs,
+    }
+
+    return {
+        "inputs": inputs,
+        "bit_labels": bit_labels,
+        "channel_target": channel_target,
+        "snr_db": snr_db,
+        "metadata": metadata,
+    }
+
+
+def save_dataset(data: dict[str, Any], output_path: Path) -> None:
+    """Save dataset to disk."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(data, output_path)
+    size_mb = output_path.stat().st_size / (1024 * 1024)
+    print(f"  Saved: {output_path} ({size_mb:.1f} MB, {data['metadata']['num_samples']} samples)")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Generate cached validation and test datasets",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=PROJECT_ROOT / "data",
+        help="Output directory for generated datasets (default: ./data)",
+    )
+    parser.add_argument(
+        "--num-samples",
+        type=int,
+        default=32768,
+        help="Number of samples per dataset (default: 32768)",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=256,
+        help="Batch size for generation (default: 256)",
+    )
+    parser.add_argument(
+        "--split",
+        choices=["val", "test", "both"],
+        default="both",
+        help="Which split(s) to generate (default: both)",
+    )
+    parser.add_argument(
+        "--profiles",
+        nargs="+",
+        choices=SUPPORTED_PROFILES,
+        default=SUPPORTED_PROFILES,
+        help=f"Channel profiles to generate (default: all = {SUPPORTED_PROFILES})",
+    )
+    parser.add_argument(
+        "--include-mixed",
+        action="store_true",
+        default=True,
+        help="Also generate mixed-profile datasets (default: True)",
+    )
+    parser.add_argument(
+        "--no-mixed",
+        action="store_false",
+        dest="include_mixed",
+        help="Skip mixed-profile dataset generation",
+    )
+    parser.add_argument(
+        "--base-seed",
+        type=int,
+        default=67,
+        help="Base random seed (default: 67, matching config.yaml)",
+    )
+
+    args = parser.parse_args()
+
+    splits_to_generate = []
+    if args.split in ("val", "both"):
+        splits_to_generate.append(("val", VAL_SEED_OFFSET))
+    if args.split in ("test", "both"):
+        splits_to_generate.append(("test", TEST_SEED_OFFSET))
+
+    print("=" * 60)
+    print("Dataset Generation Configuration")
+    print("=" * 60)
+    print(f"  Output directory: {args.output_dir}")
+    print(f"  Samples per dataset: {args.num_samples}")
+    print(f"  Batch size: {args.batch_size}")
+    print(f"  Splits: {[s[0] for s in splits_to_generate]}")
+    print(f"  Profiles: {args.profiles}")
+    print(f"  Include mixed: {args.include_mixed}")
+    print(f"  Base seed: {args.base_seed}")
+    print("=" * 60)
+
+    for split_name, seed_offset in splits_to_generate:
+        split_dir = args.output_dir / split_name
+        split_seed = args.base_seed + seed_offset
+
+        print(f"\n{'=' * 60}")
+        print(f"Generating {split_name.upper()} datasets (seed offset: {seed_offset})")
+        print(f"{'=' * 60}")
+
+        # Generate per-profile datasets
+        for profile in args.profiles:
+            profile_seed = split_seed + SUPPORTED_PROFILES.index(profile) * 10_000
+            print(f"\n[{split_name}/{profile}] Seed: {profile_seed}")
+
+            data = generate_dataset(
+                profile=profile,
+                num_samples=args.num_samples,
+                batch_size=args.batch_size,
+                seed=profile_seed,
+                desc=f"{split_name}/{profile}",
+            )
+            save_dataset(data, split_dir / f"{profile}.pt")
+
+        # Generate mixed dataset
+        if args.include_mixed and len(args.profiles) > 1:
+            mixed_seed = split_seed + 90_000
+            print(f"\n[{split_name}/mixed] Seed: {mixed_seed}")
+
+            data = generate_mixed_dataset(
+                profiles=args.profiles,
+                num_samples=args.num_samples,
+                batch_size=args.batch_size,
+                seed=mixed_seed,
+                desc=f"{split_name}/mixed",
+            )
+            save_dataset(data, split_dir / "mixed.pt")
+
+    print(f"\n{'=' * 60}")
+    print("Generation complete!")
+    print(f"{'=' * 60}")
+    print(f"\nDatasets saved to: {args.output_dir}")
+    print("\nTo use in training, update config.yaml:")
+    print(f"  validation.dataset_path: {args.output_dir}/val/mixed.pt")
+    print(f"  evaluation.dataset_path: {args.output_dir}/test/mixed.pt")
+
+
+if __name__ == "__main__":
+    main()
