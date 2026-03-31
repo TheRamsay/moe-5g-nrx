@@ -5,8 +5,8 @@ __pycache__/
 *.pyc
 .DS_Store
 
-# Weights & Biases local logs
-wandb/
+# Weights & Biases local logs at repo root
+/wandb/
 
 # Model checkpoints and data
 checkpoints/

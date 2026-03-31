@@ -1,0 +1,15 @@
+# @package _global_
+logging:
+  use_wandb: true
+  log_every_n_steps: 50
+  
+  # Wandb-specific settings
+  project: moe-5g-nrx
+  entity: null  # Set to your wandb username/team
+  tags: []
+  notes: null
+  
+  # What to log
+  log_code: true
+  log_model: false  # Set to true to save checkpoints to wandb
+  log_system_metrics: true
