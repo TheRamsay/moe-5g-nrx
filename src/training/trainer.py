@@ -8,8 +8,10 @@ from typing import Any
 import torch
 import wandb
 from omegaconf import OmegaConf
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from src.data import CachedNRXBatch, build_cached_dataloader
 from src.models import StaticDenseNRX
 from src.utils.logging import finish_wandb, log_metrics, setup_wandb
 
@@ -31,6 +33,8 @@ class Trainer:
         self.loss_fn = torch.nn.BCEWithLogitsLoss()
         self.channel_loss_fn = torch.nn.MSELoss()
         self.global_step = 0
+        self._val_dataloader: DataLoader | None = None
+        self._setup_validation()
 
     def train_step(self, batch: tuple[torch.Tensor, torch.Tensor, torch.Tensor]) -> dict[str, Any]:
         """Run a single optimization step."""
@@ -79,9 +83,12 @@ class Trainer:
         }
 
     def train(self, train_loader, num_steps: int) -> None:
-        """Main training loop with periodic metric logging."""
+        """Main training loop with periodic metric logging and validation."""
         data_iterator = iter(train_loader)
         progress = tqdm(total=num_steps, desc="train", dynamic_ncols=True)
+
+        val_enabled = self._validation_enabled()
+        val_every_n = int(self.cfg.validation.every_n_steps) if val_enabled else 0
 
         while self.global_step < num_steps:
             try:
@@ -113,6 +120,16 @@ class Trainer:
                     f"ber={metrics['ber']:.4f} ser={metrics['ser']:.4f} bler={metrics['bler']:.4f} "
                     f"block_bits(mean/p90/max)="
                     f"{metrics['block_bit_errors_mean']:.1f}/{metrics['block_bit_errors_p90']:.1f}/{metrics['block_bit_errors_max']:.1f}"
+                )
+
+            # Periodic validation
+            if val_enabled and self.global_step % val_every_n == 0:
+                val_metrics = self.validate()
+                if self.use_wandb:
+                    log_metrics(self._format_val_metrics(val_metrics), step=self.global_step)
+                print(
+                    f"  [VAL] step={self.global_step} loss={val_metrics['loss']:.4f} "
+                    f"ber={val_metrics['ber']:.4f} bler={val_metrics['bler']:.4f}"
                 )
 
         progress.close()
@@ -192,3 +209,109 @@ class Trainer:
             multi_loss = multi_loss + self.loss_fn(logits, targets)
             multi_loss = multi_loss + channel_weight * self.channel_loss_fn(channel_estimate, channel_targets)
         return multi_loss
+
+    def _setup_validation(self) -> None:
+        """Initialize validation dataloader if enabled."""
+        if not self._validation_enabled():
+            return
+
+        val_path = Path(self.cfg.validation.dataset_path)
+        if not val_path.exists():
+            print(f"[WARNING] Validation dataset not found: {val_path}")
+            print("  Run: python scripts/generate_datasets.py --split val")
+            return
+
+        max_samples = self.cfg.validation.get("max_samples")
+        self._val_dataloader = build_cached_dataloader(
+            path=val_path,
+            batch_size=int(self.cfg.validation.batch_size),
+            max_samples=int(max_samples) if max_samples else None,
+            num_workers=0,
+            pin_memory=False,
+            shuffle=False,
+        )
+        print(f"[INFO] Validation dataset loaded: {val_path}")
+
+    def _validation_enabled(self) -> bool:
+        """Check if validation is configured and enabled."""
+        if not hasattr(self.cfg, "validation"):
+            return False
+        if not self.cfg.validation.get("enabled", False):
+            return False
+        return True
+
+    @staticmethod
+    def _format_val_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
+        """Namespace validation metrics for cleaner WandB plots."""
+        return {f"val/{key}": value for key, value in metrics.items()}
+
+    @torch.no_grad()
+    def validate(self) -> dict[str, Any]:
+        """Run validation on the cached validation dataset.
+
+        Returns:
+            Dictionary with aggregated validation metrics.
+        """
+        if self._val_dataloader is None:
+            return {}
+
+        self.model.eval()
+        bits_per_symbol = int(self.cfg.data.bits_per_symbol)
+
+        total_loss = 0.0
+        total_bit_errors = 0
+        total_bits = 0
+        total_block_errors = 0
+        total_blocks = 0
+        total_symbol_errors = 0
+        total_symbols = 0
+        total_channel_mse = 0.0
+        num_batches = 0
+
+        for batch in self._val_dataloader:
+            batch: CachedNRXBatch
+            features = batch.inputs.to(self.device)
+            # Flatten bit_labels to match training format
+            targets = batch.bit_labels.flatten(start_dim=1).to(self.device)
+            channel_targets = batch.channel_target.to(self.device)
+
+            outputs = self.model(features)
+            logits = outputs["logits"]
+            channel_estimate = outputs["channel_estimate"]
+
+            # Compute loss
+            loss = self._compute_loss(outputs, targets, channel_targets)
+            total_loss += float(loss.item())
+
+            # Compute metrics
+            predictions = (logits > 0.0).to(dtype=targets.dtype)
+            bit_errors = (predictions != targets).to(dtype=torch.float32)
+
+            total_bit_errors += int(bit_errors.sum().item())
+            total_bits += int(targets.numel())
+
+            block_errors = bit_errors.any(dim=1).to(dtype=torch.float32)
+            total_block_errors += int(block_errors.sum().item())
+            total_blocks += int(block_errors.numel())
+
+            symbol_errors = (
+                bit_errors.view(bit_errors.shape[0], -1, bits_per_symbol).any(dim=-1).to(dtype=torch.float32)
+            )
+            total_symbol_errors += int(symbol_errors.sum().item())
+            total_symbols += int(symbol_errors.numel())
+
+            channel_mse = self.channel_loss_fn(channel_estimate, channel_targets)
+            total_channel_mse += float(channel_mse.item())
+
+            num_batches += 1
+
+        self.model.train()
+
+        return {
+            "loss": total_loss / max(num_batches, 1),
+            "ber": total_bit_errors / max(total_bits, 1),
+            "bler": total_block_errors / max(total_blocks, 1),
+            "ser": total_symbol_errors / max(total_symbols, 1),
+            "channel_mse": total_channel_mse / max(num_batches, 1),
+            "num_samples": total_blocks,
+        }

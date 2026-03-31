@@ -129,6 +129,63 @@ uv run python main.py experiment=exp05_dense_capacity_large
 
 These three runs share the same WandB group `dense-capacity-v1` so they are easy to compare.
 
+## Validation & Test Datasets
+
+Training data is generated dynamically via Sionna. For reproducible evaluation, generate cached validation/test datasets:
+
+```bash
+# Generate all datasets (val + test for UMa, TDL-C, mixed)
+uv run python scripts/generate_datasets.py
+
+# Generate only validation sets
+uv run python scripts/generate_datasets.py --split val
+
+# Custom sample count
+uv run python scripts/generate_datasets.py --num-samples 16384
+```
+
+Datasets are saved to `data/val/` and `data/test/` (gitignored).
+
+### Training Modes
+
+Train on a single channel profile or mixed (alternating UMa/TDL-C):
+
+```bash
+# Single profile training
+uv run python main.py dataset=tdlc   # TDL-C only
+uv run python main.py dataset=uma    # UMa only
+
+# Mixed training (alternates between UMa and TDL-C each batch)
+uv run python main.py dataset=mixed
+```
+
+### Validation During Training
+
+Validation runs periodically during training using cached val datasets:
+
+```bash
+# Train with periodic validation (every 500 steps)
+uv run python main.py validation.every_n_steps=500
+
+# Disable validation
+uv run python main.py validation.enabled=false
+```
+
+### Test Evaluation (Post-Training Only)
+
+Test datasets are used **only after training completes**:
+
+```bash
+# Evaluate on default test set
+uv run python scripts/evaluate.py --checkpoint checkpoints/static_dense.pt
+
+# Evaluate on all channel profiles
+uv run python scripts/evaluate.py --checkpoint checkpoints/model.pt --all-profiles
+
+# SNR-binned analysis
+uv run python scripts/evaluate.py --checkpoint checkpoints/model.pt --snr-bins 5
+```
+
 ## Wandb
 
 ```bash

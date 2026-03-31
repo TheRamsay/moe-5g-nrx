@@ -1,12 +1,28 @@
+from .cached_dataset import (
+    CachedNRXBatch,
+    CachedNRXDataset,
+    CachedNRXSample,
+    build_cached_dataloader,
+    collate_cached_batch,
+)
+from .constants import GENERATABLE_PROFILES, ChannelProfile
 from .sionna_generator import SimulatorBatch, SimulatorConfig, SionnaNRXSimulator, build_simulator_from_cfg
-from .torch_dataset import NRXBatch, build_dataloader, peek_batch
+from .torch_dataset import MixedNRXIterableDataset, NRXBatch, build_dataloader, peek_batch
 
 __all__ = [
+    "CachedNRXBatch",
+    "CachedNRXDataset",
+    "CachedNRXSample",
+    "ChannelProfile",
+    "GENERATABLE_PROFILES",
+    "MixedNRXIterableDataset",
     "NRXBatch",
     "SionnaNRXSimulator",
     "SimulatorBatch",
     "SimulatorConfig",
+    "build_cached_dataloader",
     "build_dataloader",
     "build_simulator_from_cfg",
+    "collate_cached_batch",
     "peek_batch",
 ]
