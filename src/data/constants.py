@@ -5,11 +5,11 @@ from typing import Final
 
 
 class ChannelProfile(str, Enum):
-    """Supported synthetic channel models."""
+    """Supported synthetic channel models for training/evaluation."""
 
-    AWGN = "awgn"
     UMA = "uma"
     TDLC = "tdlc"
+    MIXED = "mixed"  # Equal sampling from UMA and TDL-C
 
 
 class Modulation(str, Enum):
@@ -21,6 +21,9 @@ class Modulation(str, Enum):
 BITS_PER_SYMBOL: Final[dict[Modulation, int]] = {
     Modulation.QAM16: 4,
 }
+
+# Profiles that can be used for data generation (excludes MIXED which is composed)
+GENERATABLE_PROFILES: Final[list[str]] = ["uma", "tdlc"]
 
 
 def resolve_modulation(name: str | Modulation) -> Modulation:

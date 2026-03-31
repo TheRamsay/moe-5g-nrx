@@ -161,21 +161,20 @@ class SionnaNRXSimulator:
         return mapping[indices.astype(np.int8)]
 
     def _sample_channel(self, batch_size: int, freq: int, time: int) -> np.ndarray:
-        if self.cfg.channel_profile is ChannelProfile.AWGN:
-            shape = (batch_size, self.cfg.num_rx_antennas, freq, time)
-            return np.ones(shape, dtype=np.complex64)
-
         if self.cfg.channel_profile is ChannelProfile.UMA:
             return self._sample_uma_channel(batch_size, freq, time)
 
-        channel = self._get_or_create_tdl("C")
-        sampling_frequency = self.cfg.subcarrier_spacing_hz * float(freq)
-        cir_coeffs, cir_delays = channel(
-            batch_size=batch_size,
-            num_time_steps=time,
-            sampling_frequency=sampling_frequency,
-        )
-        return self._cir_to_ofdm_response(cir_coeffs, cir_delays, freq)
+        if self.cfg.channel_profile is ChannelProfile.TDLC:
+            channel = self._get_or_create_tdl("C")
+            sampling_frequency = self.cfg.subcarrier_spacing_hz * float(freq)
+            cir_coeffs, cir_delays = channel(
+                batch_size=batch_size,
+                num_time_steps=time,
+                sampling_frequency=sampling_frequency,
+            )
+            return self._cir_to_ofdm_response(cir_coeffs, cir_delays, freq)
+
+        raise ValueError(f"Unsupported channel profile: {self.cfg.channel_profile}")
 
     def _sample_uma_channel(self, batch_size: int, freq: int, time: int) -> np.ndarray:
         channel = self._get_or_create_uma_channel()

@@ -83,8 +83,8 @@ def main() -> None:
     parser.add_argument(
         "--datasets",
         nargs="+",
-        default=["awgn", "uma", "tdlc"],
-        help="Dataset profiles to visualize (base/uma/tdlc/awgn)",
+        default=["uma", "tdlc"],
+        help="Dataset profiles to visualize (uma/tdlc/mixed)",
     )
     parser.add_argument("--batches", type=int, default=3, help="Number of batches per dataset")
     parser.add_argument("--batch-size", type=int, default=16, help="Batch size for each dataset")
