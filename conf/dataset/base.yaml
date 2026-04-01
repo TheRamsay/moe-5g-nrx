@@ -3,8 +3,8 @@
 
 name: base_defaults
 
-num_subcarriers: 256        # Frequency domain: 256 subcarriers
-num_ofdm_symbols: 14        # Time domain: 14 OFDM symbols per slot
+num_subcarriers: ${data.num_subcarriers}        # Frequency domain: 256 subcarriers
+num_ofdm_symbols: ${data.num_ofdm_symbols}        # Time domain: 14 OFDM symbols per slot
 
 modulation: qam16
 carrier_frequency_hz: 3500000000.0
@@ -12,8 +12,8 @@ subcarrier_spacing_hz: 15000.0
 
 estimation_noise_std: 0.05  # LS estimate error std dev: scales noise in estimates
 
-pilot_spacing_freq: 6       # Reference signals every 6 subcarriers (freq domain)
-pilot_spacing_time: 4       # Reference signals every 4 OFDM symbols (time domain)
+pilot_spacing_freq: ${model.backbone.pilot_subcarrier_spacing}
+pilot_spacing_time: ${model.backbone.pilot_symbol_indices}
 
 loader:
   num_workers: 0

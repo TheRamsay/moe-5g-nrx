@@ -35,7 +35,7 @@ class SimulatorConfig:
     min_speed_mps: float
     max_speed_mps: float
     pilot_spacing_freq: int
-    pilot_spacing_time: int
+    pilot_spacing_time: list[int]
     uma_cell_radius_m: float
     bs_height_m: float
     ut_height_m: float
@@ -115,16 +115,29 @@ class SionnaNRXSimulator:
             endpoint=False,
             dtype=np.int8,
         ).astype(np.float32)
+        pilot_freq_idx = np.arange(0, freq, self.cfg.pilot_spacing_freq, dtype=np.int64)
+        pilot_time_idx = np.array(self.cfg.pilot_spacing_time, dtype=np.int64)
+        if pilot_freq_idx.size == 0 or pilot_time_idx.size == 0:
+            raise ValueError("Pilot grid is empty. Adjust pilot spacing in dataset config.")
+        self._stamp_known_pilot_bits(bit_labels, pilot_freq_idx, pilot_time_idx)
         tx_symbols = self._modulate(bit_labels)
         channel = self._sample_channel(batch_size, freq, time)
         noise = self._sample_noise(batch_size, freq, time, snr_db)
         rx = channel * tx_symbols[:, None, :, :] + noise
-        ls_estimate = self._estimate_channel_ls(rx, tx_symbols)
+        known_pilot_symbol = self._known_pilot_symbol()
+        ls_estimate = self._estimate_channel_ls(
+            rx=rx,
+            pilot_freq_idx=pilot_freq_idx,
+            pilot_time_idx=pilot_time_idx,
+            known_pilot_symbol=known_pilot_symbol,
+        )
         resource_grid = self._compose_resource_grid(rx, ls_estimate)
         channel_target = np.concatenate((channel.real, channel.imag), axis=1)
         batch_metadata = {
             "channel_profile": self.cfg.channel_profile.value,
             "modulation": self.cfg.modulation.value,
+            "pilot_spacing_freq": self.cfg.pilot_spacing_freq,
+            "pilot_spacing_time": self.cfg.pilot_spacing_time,
         }
         return SimulatorBatch(
             resource_grid=resource_grid.astype(np.float32),
@@ -159,6 +172,20 @@ class SionnaNRXSimulator:
         indices = bit0 * 2 + bit1
         mapping = np.array([-3.0, -1.0, 1.0, 3.0], dtype=np.float32)
         return mapping[indices.astype(np.int8)]
+
+    def _known_pilot_symbol(self) -> np.complex64:
+        # 16-QAM symbol for 0000 under this mapper: (-3 - 3j) / sqrt(10)
+        return np.complex64((-3.0 - 3.0j) / np.sqrt(10.0))  # TODO: correct??
+
+    def _stamp_known_pilot_bits(
+        self,
+        bit_labels: np.ndarray,
+        pilot_freq_idx: np.ndarray,
+        pilot_time_idx: np.ndarray,
+    ) -> None:
+        for freq_idx in pilot_freq_idx:
+            for time_idx in pilot_time_idx:
+                bit_labels[:, :, freq_idx, time_idx] = 0.0
 
     def _sample_channel(self, batch_size: int, freq: int, time: int) -> np.ndarray:
         if self.cfg.channel_profile is ChannelProfile.UMA:
@@ -322,25 +349,22 @@ class SionnaNRXSimulator:
         noise = tf.complex(real, imag)
         return noise.numpy().astype(np.complex64)
 
-    def _estimate_channel_ls(self, rx: np.ndarray, tx_symbols: np.ndarray) -> np.ndarray:
+    def _estimate_channel_ls(
+        self,
+        rx: np.ndarray,
+        pilot_freq_idx: np.ndarray,
+        pilot_time_idx: np.ndarray,
+        known_pilot_symbol: np.complex64,
+    ) -> np.ndarray:
         freq = rx.shape[2]
         time = rx.shape[3]
-        pilot_freq_idx = np.arange(0, freq, self.cfg.pilot_spacing_freq, dtype=np.int64)
-        pilot_time_idx = np.arange(0, time, self.cfg.pilot_spacing_time, dtype=np.int64)
-        if pilot_freq_idx.size == 0 or pilot_time_idx.size == 0:
-            raise ValueError("Pilot grid is empty. Adjust pilot spacing in dataset config.")
-
-        tx_safe = tx_symbols.copy()
-        tx_safe[np.abs(tx_safe) < 1e-6] = 1e-6 + 0j
-
+        if np.abs(known_pilot_symbol) < 1e-6:
+            raise ValueError("Known pilot symbol magnitude must be non-zero.")
         h_est = np.zeros_like(rx, dtype=np.complex64)
         for batch_idx in range(rx.shape[0]):
-            tx_grid = tx_safe[batch_idx]
             for ant_idx in range(rx.shape[1]):
                 y_grid = rx[batch_idx, ant_idx]
-                pilot_ls = (
-                    y_grid[np.ix_(pilot_freq_idx, pilot_time_idx)] / tx_grid[np.ix_(pilot_freq_idx, pilot_time_idx)]
-                )
+                pilot_ls = y_grid[np.ix_(pilot_freq_idx, pilot_time_idx)] / known_pilot_symbol
                 h_est[batch_idx, ant_idx] = self._interpolate_pilot_grid(
                     pilot_ls,
                     pilot_freq_idx,
@@ -422,8 +446,8 @@ def build_simulator_from_cfg(cfg: Any) -> SionnaNRXSimulator:
         delay_spread_s=float(getattr(cfg.dataset, "delay_spread_s", 100e-9)),
         min_speed_mps=float(getattr(cfg.dataset, "min_speed_mps", 0.0)),
         max_speed_mps=float(getattr(cfg.dataset, "max_speed_mps", 30.0)),
-        pilot_spacing_freq=int(getattr(cfg.dataset, "pilot_spacing_freq", 6)),
-        pilot_spacing_time=int(getattr(cfg.dataset, "pilot_spacing_time", 4)),
+        pilot_spacing_freq=int(getattr(cfg.dataset, "pilot_spacing_freq", 2)),
+        pilot_spacing_time=list(getattr(cfg.dataset, "pilot_spacing_time", [2, 11])),
         uma_cell_radius_m=float(getattr(cfg.dataset, "uma_cell_radius_m", 500.0)),
         bs_height_m=float(getattr(cfg.dataset, "bs_height_m", 25.0)),
         ut_height_m=float(getattr(cfg.dataset, "ut_height_m", 1.5)),

@@ -45,7 +45,7 @@ validation:
 
 evaluation:
     checkpoint: checkpoints/static_dense_nrx.pt
-    dataset_path: data/test/tdlc.pt
+    dataset_path: data/test/mixed.pt
     batch_size: 64
     max_samples: null
     all_profiles: true
