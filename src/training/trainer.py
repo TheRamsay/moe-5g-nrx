@@ -6,14 +6,15 @@ from pathlib import Path
 from typing import Any
 
 import torch
-import wandb
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+import wandb
 from src.data import CachedNRXBatch, build_cached_dataloader
 from src.models import StaticDenseNRX
 from src.utils.logging import finish_wandb, log_metrics, setup_wandb
+from src.utils.metrics import compute_batch_error_metrics
 
 
 class Trainer:
@@ -55,24 +56,23 @@ class Trainer:
         grad_norm = float(torch.nn.utils.clip_grad_norm_(self.model.parameters(), clip_value))
         self.optimizer.step()
 
-        predictions = (logits > 0.0).to(dtype=targets.dtype)
-        bit_errors = (predictions != targets).to(dtype=torch.float32)
-        bit_error_rate = bit_errors.mean()
-        block_error_rate = bit_errors.any(dim=1).to(dtype=torch.float32).mean()
-        bit_errors_per_block = bit_errors.sum(dim=1)
-
-        bits_per_symbol = int(self.cfg.data.bits_per_symbol)
-        symbol_errors = bit_errors.view(bit_errors.shape[0], -1, bits_per_symbol).any(dim=-1).to(dtype=torch.float32)
-        symbol_error_rate = symbol_errors.mean()
+        error_metrics = compute_batch_error_metrics(
+            logits,
+            targets,
+            bits_per_symbol=int(self.cfg.data.bits_per_symbol),
+            num_subcarriers=int(self.cfg.data.num_subcarriers),
+            num_ofdm_symbols=int(self.cfg.data.num_ofdm_symbols),
+        )
+        bit_errors_per_block = error_metrics.bit_errors_per_block
 
         block_error_quantiles = torch.quantile(bit_errors_per_block, torch.tensor([0.5, 0.9], device=self.device))
         channel_mse = self.channel_loss_fn(channel_estimate, channel_targets)
 
         return {
             "loss": float(loss.detach().cpu().item()),
-            "ber": float(bit_error_rate.detach().cpu().item()),
-            "bler": float(block_error_rate.detach().cpu().item()),
-            "ser": float(symbol_error_rate.detach().cpu().item()),
+            "ber": float(error_metrics.ber.detach().cpu().item()),
+            "bler": float(error_metrics.bler.detach().cpu().item()),
+            "ser": float(error_metrics.ser.detach().cpu().item()),
             "block_bit_errors_mean": float(bit_errors_per_block.mean().detach().cpu().item()),
             "block_bit_errors_median": float(block_error_quantiles[0].detach().cpu().item()),
             "block_bit_errors_p90": float(block_error_quantiles[1].detach().cpu().item()),
@@ -208,7 +208,7 @@ class Trainer:
         for logits, channel_estimate in zip(intermediate_logits, intermediate_channel_estimates):
             multi_loss = multi_loss + self.loss_fn(logits, targets)
             multi_loss = multi_loss + channel_weight * self.channel_loss_fn(channel_estimate, channel_targets)
-        return multi_loss
+        return final_loss + multi_loss
 
     def _setup_validation(self) -> None:
         """Initialize validation dataloader if enabled."""
@@ -256,8 +256,6 @@ class Trainer:
             return {}
 
         self.model.eval()
-        bits_per_symbol = int(self.cfg.data.bits_per_symbol)
-
         total_loss = 0.0
         total_bit_errors = 0
         total_bits = 0
@@ -284,19 +282,23 @@ class Trainer:
             total_loss += float(loss.item())
 
             # Compute metrics
-            predictions = (logits > 0.0).to(dtype=targets.dtype)
-            bit_errors = (predictions != targets).to(dtype=torch.float32)
+            error_metrics = compute_batch_error_metrics(
+                logits,
+                targets,
+                bits_per_symbol=int(self.cfg.data.bits_per_symbol),
+                num_subcarriers=int(self.cfg.data.num_subcarriers),
+                num_ofdm_symbols=int(self.cfg.data.num_ofdm_symbols),
+            )
+            bit_errors = error_metrics.bit_errors
 
             total_bit_errors += int(bit_errors.sum().item())
             total_bits += int(targets.numel())
 
-            block_errors = bit_errors.any(dim=1).to(dtype=torch.float32)
+            block_errors = error_metrics.block_errors
             total_block_errors += int(block_errors.sum().item())
             total_blocks += int(block_errors.numel())
 
-            symbol_errors = (
-                bit_errors.view(bit_errors.shape[0], -1, bits_per_symbol).any(dim=-1).to(dtype=torch.float32)
-            )
+            symbol_errors = error_metrics.symbol_errors
             total_symbol_errors += int(symbol_errors.sum().item())
             total_symbols += int(symbol_errors.numel())
 

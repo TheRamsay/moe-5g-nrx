@@ -23,6 +23,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.data import CachedNRXBatch, build_cached_dataloader  # noqa: E402
 from src.models import StaticDenseNRX  # noqa: E402
+from src.utils.metrics import compute_batch_error_metrics  # noqa: E402
 
 
 def load_checkpoint(checkpoint_path: Path, device: torch.device) -> tuple[torch.nn.Module, dict[str, Any]]:
@@ -62,6 +63,7 @@ def evaluate_dataset(
     dataloader: torch.utils.data.DataLoader,
     device: torch.device,
     bits_per_symbol: int,
+    channel_loss_weight: float,
     snr_bins: int | None = None,
 ) -> dict[str, Any]:
     """Evaluate model on a dataset.
@@ -81,6 +83,7 @@ def evaluate_dataset(
 
     # Accumulators for overall metrics
     total_loss = 0.0
+    total_bce_loss = 0.0
     total_bit_errors = 0
     total_bits = 0
     total_block_errors = 0
@@ -108,17 +111,26 @@ def evaluate_dataset(
         channel_estimate = outputs["channel_estimate"]
 
         # Loss
-        loss = loss_fn(logits, targets)
+        bce_loss = loss_fn(logits, targets)
+        channel_mse = channel_loss_fn(channel_estimate, channel_targets)
+        loss = bce_loss + channel_loss_weight * channel_mse
         total_loss += float(loss.item())
+        total_bce_loss += float(bce_loss.item())
 
         # Compute per-sample metrics
-        predictions = (logits > 0.0).to(dtype=targets.dtype)
-        bit_errors = (predictions != targets).to(dtype=torch.float32)
+        error_metrics = compute_batch_error_metrics(
+            logits,
+            targets,
+            bits_per_symbol=bits_per_symbol,
+            num_subcarriers=features.shape[2],
+            num_ofdm_symbols=features.shape[3],
+        )
+        bit_errors = error_metrics.bit_errors
 
         # Per-sample bit errors (for SNR analysis)
         per_sample_bit_errors = bit_errors.sum(dim=1).cpu().numpy()
         per_sample_bits = targets.shape[1]
-        per_sample_block_error = bit_errors.any(dim=1).cpu().numpy().astype(int)
+        per_sample_block_error = error_metrics.block_errors.cpu().numpy().astype(int)
 
         all_snr_db.extend(snr_db.numpy().tolist())
         all_bit_errors.extend(per_sample_bit_errors.tolist())
@@ -129,21 +141,22 @@ def evaluate_dataset(
         total_bit_errors += int(bit_errors.sum().item())
         total_bits += int(targets.numel())
 
-        block_errors = bit_errors.any(dim=1).to(dtype=torch.float32)
+        block_errors = error_metrics.block_errors
         total_block_errors += int(block_errors.sum().item())
         total_blocks += int(block_errors.numel())
 
-        symbol_errors = bit_errors.view(bit_errors.shape[0], -1, bits_per_symbol).any(dim=-1).to(dtype=torch.float32)
+        symbol_errors = error_metrics.symbol_errors
         total_symbol_errors += int(symbol_errors.sum().item())
         total_symbols += int(symbol_errors.numel())
 
-        channel_mse = channel_loss_fn(channel_estimate, channel_targets)
         total_channel_mse += float(channel_mse.item())
 
         num_batches += 1
 
     results = {
         "loss": total_loss / max(num_batches, 1),
+        "loss_total": total_loss / max(num_batches, 1),
+        "loss_bce": total_bce_loss / max(num_batches, 1),
         "ber": total_bit_errors / max(total_bits, 1),
         "bler": total_block_errors / max(total_blocks, 1),
         "ser": total_symbol_errors / max(total_symbols, 1),
@@ -195,7 +208,8 @@ def print_results(results: dict[str, Any], dataset_name: str) -> None:
     print(f"Results for: {dataset_name}")
     print(f"{'=' * 60}")
     print(f"  Samples:      {results['num_samples']:,}")
-    print(f"  Loss:         {results['loss']:.6f}")
+    print(f"  Loss total:   {results['loss_total']:.6f}")
+    print(f"  Loss BCE:     {results['loss_bce']:.6f}")
     print(f"  BER:          {results['ber']:.6e}")
     print(f"  BLER:         {results['bler']:.4f} ({results['num_block_errors']:,} / {results['num_samples']:,})")
     print(f"  SER:          {results['ser']:.6e}")
@@ -237,6 +251,7 @@ def main(cfg: DictConfig) -> None:
 
     model, config = load_checkpoint(checkpoint_path, device)
     bits_per_symbol = int(config["data"]["bits_per_symbol"])
+    channel_loss_weight = float(config["model"]["compute"]["channel_loss_weight"])
     print(f"  Model: {config['model']['name']}")
     print(f"  Global step: {torch.load(checkpoint_path, weights_only=False)['global_step']}")
 
@@ -271,6 +286,7 @@ def main(cfg: DictConfig) -> None:
             dataloader=dataloader,
             device=device,
             bits_per_symbol=bits_per_symbol,
+            channel_loss_weight=channel_loss_weight,
             snr_bins=int(eval_cfg.snr_bins) if eval_cfg.snr_bins is not None else None,
         )
         all_results[name] = results
@@ -284,7 +300,7 @@ def main(cfg: DictConfig) -> None:
         print(f"  {'Profile':>10} | {'BLER':>10} | {'BER':>12} | {'Loss':>10}")
         print(f"  {'-' * 10}-+-{'-' * 10}-+-{'-' * 12}-+-{'-' * 10}")
         for name, results in all_results.items():
-            print(f"  {name:>10} | {results['bler']:10.4f} | {results['ber']:12.6e} | {results['loss']:10.6f}")
+            print(f"  {name:>10} | {results['bler']:10.4f} | {results['ber']:12.6e} | {results['loss_total']:10.6f}")
 
 
 if __name__ == "__main__":
