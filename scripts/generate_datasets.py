@@ -23,10 +23,6 @@ if str(SRC_ROOT) not in sys.path:
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-# Seed offsets to ensure no overlap with training data
-VAL_SEED_OFFSET = 1_000_000
-TEST_SEED_OFFSET = 2_000_000
-
 
 def build_config(profile: str, batch_size: int, seed: int) -> DictConfig:
     """Build Hydra config for a specific channel profile."""
@@ -230,6 +226,8 @@ def save_dataset(data: dict[str, Any], output_path: Path) -> None:
 
 
 def _resolve_split(split: str) -> list[tuple[str, int]]:
+    from src.data.constants import TEST_SEED_OFFSET, VAL_SEED_OFFSET
+
     split_normalized = split.lower()
     if split_normalized == "val":
         return [("val", VAL_SEED_OFFSET)]
@@ -283,8 +281,10 @@ def main(cfg: DictConfig) -> None:
         print(f"{'=' * 60}")
 
         # Generate per-profile datasets
+        sorted_profiles = sorted(profiles)
         for profile in profiles:
-            profile_seed = split_seed + sorted(profiles).index(profile) * 10_000
+            profile_idx = sorted_profiles.index(profile)
+            profile_seed = split_seed + profile_idx * 10_000
             print(f"\n[{split_name}/{profile}] Seed: {profile_seed}")
 
             data = generate_dataset(

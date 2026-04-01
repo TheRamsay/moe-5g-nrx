@@ -9,6 +9,12 @@ import torch
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, IterableDataset
 
+from .constants import (
+    MIXED_PROFILE_SEED_OFFSET,
+    MIXED_SIMULATOR_SEED_OFFSET,
+    TRAIN_ITERATION_SEED_OFFSET,
+    TRAIN_WORKER_SEED_OFFSET,
+)
 from .sionna_generator import SimulatorBatch, SionnaNRXSimulator, build_simulator_from_cfg
 
 
@@ -49,6 +55,13 @@ class NRXIterableDataset(IterableDataset[NRXBatch]):
             self._simulator = build_simulator_from_cfg(cfg)
         return self._simulator
 
+    def _resolve_iteration_seed(self, worker_id: int) -> int | None:
+        if self.base_seed is None:
+            return None
+        worker_offset = worker_id * TRAIN_WORKER_SEED_OFFSET
+        iteration_offset = self._iteration_index * TRAIN_ITERATION_SEED_OFFSET
+        return self.base_seed + worker_offset + iteration_offset
+
     def __iter__(self) -> Iterator[NRXBatch]:
         worker = torch.utils.data.get_worker_info()
         worker_id = worker.id if worker is not None else 0
@@ -57,10 +70,9 @@ class NRXIterableDataset(IterableDataset[NRXBatch]):
         simulator = self._get_or_create_simulator()
 
         # Offset RNG streams by worker and iteration to avoid overlap.
-        worker_offset = worker_id * 100_000
-        iteration_offset = self._iteration_index * 1_000_000
-        if self.base_seed is not None:
-            simulator.reseed(self.base_seed + worker_offset + iteration_offset)
+        iteration_seed = self._resolve_iteration_seed(worker_id)
+        if iteration_seed is not None:
+            simulator.reseed(iteration_seed)
         self._iteration_index += 1
 
         if self.max_batches is None:
@@ -134,6 +146,13 @@ class MixedNRXIterableDataset(IterableDataset[NRXBatch]):
             self._simulators[profile] = build_simulator_from_cfg(cfg)
         return self._simulators[profile]
 
+    def _resolve_iteration_seed(self, worker_id: int) -> int | None:
+        if self.base_seed is None:
+            return None
+        worker_offset = worker_id * TRAIN_WORKER_SEED_OFFSET
+        iteration_offset = self._iteration_index * TRAIN_ITERATION_SEED_OFFSET
+        return self.base_seed + worker_offset + iteration_offset
+
     def __iter__(self) -> Iterator[NRXBatch]:
         worker = torch.utils.data.get_worker_info()
         worker_id = worker.id if worker is not None else 0
@@ -144,17 +163,18 @@ class MixedNRXIterableDataset(IterableDataset[NRXBatch]):
             self._get_or_create_simulator(profile)
 
         # Offset RNG streams by worker and iteration
-        worker_offset = worker_id * 100_000
-        iteration_offset = self._iteration_index * 1_000_000
-        if self.base_seed is not None:
-            seed = self.base_seed + worker_offset + iteration_offset
-            for sim in self._simulators.values():
-                sim.reseed(seed)
-                seed += 50_000  # Different seed per profile
+        iteration_seed = self._resolve_iteration_seed(worker_id)
+        if iteration_seed is not None:
+            for profile_idx, profile in enumerate(self.profiles):
+                simulator = self._simulators[profile]
+                simulator.reseed(iteration_seed + profile_idx * MIXED_SIMULATOR_SEED_OFFSET)
         self._iteration_index += 1
 
         # RNG for profile selection (random strategy)
-        profile_rng = np.random.default_rng(self.base_seed)
+        profile_rng_seed = None
+        if iteration_seed is not None:
+            profile_rng_seed = iteration_seed + MIXED_PROFILE_SEED_OFFSET
+        profile_rng = np.random.default_rng(profile_rng_seed)
 
         if self.max_batches is None:
             batch_idx = 0

@@ -22,6 +22,14 @@ BITS_PER_SYMBOL: Final[dict[Modulation, int]] = {
     Modulation.QAM16: 4,
 }
 
+# Seed namespace offsets used to avoid train/val/test overlap.
+TRAIN_ITERATION_SEED_OFFSET: Final[int] = 1_000_000
+TRAIN_WORKER_SEED_OFFSET: Final[int] = 100_000
+MIXED_SIMULATOR_SEED_OFFSET: Final[int] = 50_000
+VAL_SEED_OFFSET: Final[int] = 500_000_000
+TEST_SEED_OFFSET: Final[int] = 1_000_000_000
+MIXED_PROFILE_SEED_OFFSET: Final[int] = 1_000_000
+
 # Profiles that can be used for data generation (excludes MIXED which is composed)
 GENERATABLE_PROFILES: Final[list[str]] = ["uma", "tdlc"]
 
