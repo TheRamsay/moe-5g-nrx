@@ -2,7 +2,7 @@
 logging:
   # Wandb-specific settings
   project: moe-5g-nrx
-  entity: null  # Set to your wandb username/team
+  entity: knn_moe-5g-nrx
   tags: []
   notes: null
   

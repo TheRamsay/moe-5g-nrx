@@ -19,7 +19,7 @@ if [[ -z "${SCRATCHDIR:-}" ]]; then
     return 1
 fi
 
-set -euo pipefail
+set -uo pipefail
 
 DEFAULT_GPU_MODULES="${DEFAULT_GPU_MODULES:-cuda/11.6.2-gcc-10.2.1-nwpmxyy cudnn/8.4.0.27-11.6-gcc-10.2.1-pqxrvlk}"
 
@@ -97,7 +97,7 @@ stage_code() {
         --exclude 'results/' \
         --exclude 'dist/' \
         --exclude 'outputs/' \
-        "$REPO_ROOT/" "$WORK_ROOT/"
+        "$REPO_ROOT/" "$WORK_ROOT/" || return 1
     log "Code staged to: $WORK_ROOT"
 }
 
@@ -109,7 +109,7 @@ setup_venv() {
         cd "$WORK_ROOT"
         UV_PROJECT_ENVIRONMENT="$WORK_ROOT/.venv" \
             "$UV_BIN" sync --python 3.10 --frozen --offline --no-dev
-    )
+    ) || return 1
     log "Environment ready at: $WORK_ROOT/.venv"
 }
 
@@ -127,13 +127,20 @@ sync_back() {
 run_experiment() {
     local args="${1:-model=static_dense dataset=mixed runtime.device=cuda}"
     local run_args=()
+    local status=0
     log "Running: python main.py $args"
     split_cli_args "$args" run_args
     (
         cd "$WORK_ROOT"
         UV_PROJECT_ENVIRONMENT="$WORK_ROOT/.venv" \
             "$UV_BIN" run --offline --python 3.10 python main.py "${run_args[@]}" 2>&1 | tee -a "$ARTIFACT_DIR/run.log"
-    )
+    ) || status=$?
+
+    if [[ $status -ne 0 ]]; then
+        log "Command failed with exit code $status"
+    fi
+
+    return $status
 }
 
 # Show current environment status
@@ -192,8 +199,8 @@ if command -v module &>/dev/null; then
 fi
 
 # Stage and setup
-stage_code
-setup_venv
+stage_code || return 1
+setup_venv || return 1
 
 # Create artifact directory
 mkdir -p "$ARTIFACT_DIR"
