@@ -5,6 +5,18 @@ IFS=$'\n\t'
 
 DEFAULT_GPU_MODULES="${DEFAULT_GPU_MODULES:-cuda/11.6.2-gcc-10.2.1-nwpmxyy cudnn/8.4.0.27-11.6-gcc-10.2.1-pqxrvlk}"
 
+add_modules() {
+    local modules_string="$1"
+    local -a modules=()
+    local old_ifs="$IFS"
+    IFS=' '
+    read -r -a modules <<< "$modules_string"
+    IFS="$old_ifs"
+    if [[ ${#modules[@]} -gt 0 ]]; then
+        module add "${modules[@]}"
+    fi
+}
+
 log() {
     printf '[metacentrum-setup] %s\n' "$*"
 }
@@ -29,9 +41,7 @@ init_modules() {
         module add metabase/1 >/dev/null 2>&1 || true
 
         if [[ -n "$DEFAULT_GPU_MODULES" ]]; then
-            # shellcheck disable=SC2206
-            local default_gpu_modules=( ${DEFAULT_GPU_MODULES} )
-            module add "${default_gpu_modules[@]}"
+            add_modules "$DEFAULT_GPU_MODULES"
         fi
     fi
 }

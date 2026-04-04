@@ -23,6 +23,18 @@ set -euo pipefail
 
 DEFAULT_GPU_MODULES="${DEFAULT_GPU_MODULES:-cuda/11.6.2-gcc-10.2.1-nwpmxyy cudnn/8.4.0.27-11.6-gcc-10.2.1-pqxrvlk}"
 
+add_modules() {
+    local modules_string="$1"
+    local -a modules=()
+    local old_ifs="$IFS"
+    IFS=' '
+    read -r -a modules <<< "$modules_string"
+    IFS="$old_ifs"
+    if [[ ${#modules[@]} -gt 0 ]]; then
+        module add "${modules[@]}"
+    fi
+}
+
 # =============================================================================
 # Configuration
 # =============================================================================
@@ -163,14 +175,10 @@ if command -v module &>/dev/null; then
     module purge &>/dev/null || true
     module add metabase/1 &>/dev/null || true
     if [[ -n "$DEFAULT_GPU_MODULES" ]]; then
-        # shellcheck disable=SC2206
-        default_gpu_modules=( ${DEFAULT_GPU_MODULES} )
-        module add "${default_gpu_modules[@]}" &>/dev/null || true
+        add_modules "$DEFAULT_GPU_MODULES" &>/dev/null || true
     fi
     if [[ -n "${EXTRA_MODULES:-}" ]]; then
-        # shellcheck disable=SC2206
-        extra_modules=( ${EXTRA_MODULES} )
-        module add "${extra_modules[@]}" &>/dev/null || true
+        add_modules "$EXTRA_MODULES" &>/dev/null || true
     fi
 fi
 

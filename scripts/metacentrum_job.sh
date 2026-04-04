@@ -9,6 +9,18 @@ IFS=$'\n\t'
 
 DEFAULT_GPU_MODULES="${DEFAULT_GPU_MODULES:-cuda/11.6.2-gcc-10.2.1-nwpmxyy cudnn/8.4.0.27-11.6-gcc-10.2.1-pqxrvlk}"
 
+add_modules() {
+    local modules_string="$1"
+    local -a modules=()
+    local old_ifs="$IFS"
+    IFS=' '
+    read -r -a modules <<< "$modules_string"
+    IFS="$old_ifs"
+    if [[ ${#modules[@]} -gt 0 ]]; then
+        module add "${modules[@]}"
+    fi
+}
+
 log() {
     printf '[metacentrum-job][%s] %s\n' "${PBS_JOBID:-local}" "$*"
 }
@@ -33,15 +45,11 @@ init_modules() {
         module add metabase/1 >/dev/null 2>&1 || true
 
         if [[ -n "$DEFAULT_GPU_MODULES" ]]; then
-            # shellcheck disable=SC2206
-            local default_gpu_modules=( ${DEFAULT_GPU_MODULES} )
-            module add "${default_gpu_modules[@]}"
+            add_modules "$DEFAULT_GPU_MODULES"
         fi
 
         if [[ -n "${EXTRA_MODULES:-}" ]]; then
-            # shellcheck disable=SC2206
-            local extra_modules=( ${EXTRA_MODULES} )
-            module add "${extra_modules[@]}"
+            add_modules "$EXTRA_MODULES"
         fi
     fi
 }
@@ -52,7 +60,8 @@ REPO_ROOT="${REPO_ROOT:-${PBS_O_WORKDIR:-}}"
 [[ -n "${SCRATCHDIR:-}" ]] || die "SCRATCHDIR is not set; request scratch_local in qsub"
 [[ -d "$SCRATCHDIR" ]] || die "SCRATCHDIR does not exist: $SCRATCHDIR"
 
-UV_BIN="${UV_BIN:-$HOME/.local/bin/uv}"
+SUBMIT_HOME="${PBS_O_HOME:-$HOME}"
+UV_BIN="${UV_BIN:-$SUBMIT_HOME/.local/bin/uv}"
 if [[ ! -x "$UV_BIN" ]]; then
     UV_BIN="$(command -v uv || true)"
 fi
@@ -61,8 +70,8 @@ fi
 init_modules
 
 export PATH="$(dirname -- "$UV_BIN"):$PATH"
-export UV_CACHE_DIR="${UV_CACHE_DIR:-$HOME/.cache/uv}"
-export UV_PYTHON_INSTALL_DIR="${UV_PYTHON_INSTALL_DIR:-$HOME/.local/share/uv/python}"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-$SUBMIT_HOME/.cache/uv}"
+export UV_PYTHON_INSTALL_DIR="${UV_PYTHON_INSTALL_DIR:-$SUBMIT_HOME/.local/share/uv/python}"
 export UV_LINK_MODE=copy
 
 WORK_ROOT="$SCRATCHDIR/work"
