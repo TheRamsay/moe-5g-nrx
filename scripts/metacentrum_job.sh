@@ -39,6 +39,51 @@ die() {
     exit 1
 }
 
+configure_home_and_wandb_auth() {
+    local repo_parent
+    local candidate_home
+    local -a netrc_candidates=()
+    local api_key=""
+
+    repo_parent="$(dirname -- "$REPO_ROOT")"
+    candidate_home="$SUBMIT_HOME"
+
+    if [[ -z "$candidate_home" || ! -d "$candidate_home" || "$candidate_home" == /Users/* ]]; then
+        candidate_home="$repo_parent"
+    fi
+
+    export HOME="$candidate_home"
+    export NETRC="${NETRC:-$HOME/.netrc}"
+
+    if [[ -n "${WANDB_API_KEY:-}" ]]; then
+        return
+    fi
+
+    netrc_candidates+=("$NETRC")
+    if [[ "$repo_parent/.netrc" != "$NETRC" ]]; then
+        netrc_candidates+=("$repo_parent/.netrc")
+    fi
+
+    for netrc_path in "${netrc_candidates[@]}"; do
+        if [[ -r "$netrc_path" ]]; then
+            api_key="$(python - <<'PY' "$netrc_path"
+from pathlib import Path
+import re
+import sys
+
+text = Path(sys.argv[1]).read_text(encoding='utf-8')
+match = re.search(r"machine\s+api\.wandb\.ai\s+login\s+\S+\s+password\s+(\S+)", text, re.MULTILINE)
+print(match.group(1) if match else "")
+PY
+)"
+            if [[ -n "$api_key" ]]; then
+                export WANDB_API_KEY="$api_key"
+                break
+            fi
+        fi
+    done
+}
+
 init_modules() {
     if ! command -v module >/dev/null 2>&1; then
         [[ -r /etc/profile ]] && source /etc/profile
@@ -75,6 +120,8 @@ if [[ ! -x "$UV_BIN" ]]; then
     UV_BIN="$(command -v uv || true)"
 fi
 [[ -n "$UV_BIN" ]] || die "uv not found; run scripts/metacentrum_setup.sh first"
+
+configure_home_and_wandb_auth
 
 init_modules
 
