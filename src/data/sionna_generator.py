@@ -199,7 +199,8 @@ class SionnaNRXSimulator:
                 num_time_steps=time,
                 sampling_frequency=sampling_frequency,
             )
-            return self._cir_to_ofdm_response(cir_coeffs, cir_delays, freq)
+            response = self._cir_to_ofdm_response(cir_coeffs, cir_delays, freq)
+            return self._normalize_channel_power(response)
 
         raise ValueError(f"Unsupported channel profile: {self.cfg.channel_profile}")
 
@@ -226,7 +227,8 @@ class SionnaNRXSimulator:
             num_time_samples=time,
             sampling_frequency=sampling_frequency,
         )
-        return self._cir_to_ofdm_response(cir_coeffs, cir_delays, freq)
+        response = self._cir_to_ofdm_response(cir_coeffs, cir_delays, freq)
+        return self._normalize_channel_power(response)
 
     def _get_or_create_uma_channel(self) -> UMa:
         if self._uma_channel is not None:
@@ -338,6 +340,19 @@ class SionnaNRXSimulator:
         frequency_response = tf.reduce_sum(coeffs_expanded * phase, axis=5)
         frequency_response = tf.squeeze(frequency_response, axis=[1, 3, 4])
         return frequency_response.numpy().astype(np.complex64)
+
+    def _normalize_channel_power(self, channel: np.ndarray) -> np.ndarray:
+        """Normalize each sample to unit average channel power.
+
+        This keeps configured SNR ranges comparable across channel models. Without
+        normalization, UMa includes large-scale path loss while TDL-C is near unit
+        power, which makes the same nominal SNR correspond to drastically different
+        effective receive conditions.
+        """
+
+        power = np.mean(np.abs(channel) ** 2, axis=(1, 2, 3), keepdims=True)
+        power = np.maximum(power, 1e-12)
+        return channel / np.sqrt(power)
 
     def _sample_noise(self, batch_size: int, freq: int, time: int, snr_db: np.ndarray) -> np.ndarray:
         shape = (batch_size, self.cfg.num_rx_antennas, freq, time)
