@@ -38,7 +38,9 @@ training:
 
 validation:
     enabled: true
-    dataset_path: data/val/mixed.pt
+    dataset_path: null
+    data_dir: data/val
+    profiles: [uma, tdlc]
     batch_size: 64
     every_n_steps: 500
     max_samples: null

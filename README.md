@@ -166,11 +166,14 @@ For the current dense baselines, use `dataset=mixed` for training and evaluate t
 
 ### Validation During Training
 
-Validation runs periodically during training using cached val datasets:
+Validation runs periodically during training using cached `uma` and `tdlc` validation datasets:
 
 ```bash
 # Train with periodic validation (every 500 steps)
 uv run python main.py validation.every_n_steps=500
+
+# Validate only on a single cached dataset
+uv run python main.py validation.profiles=[] validation.dataset_path=data/val/uma.pt
 
 # Disable validation
 uv run python main.py validation.enabled=false

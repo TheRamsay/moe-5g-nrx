@@ -34,7 +34,7 @@ class Trainer:
         self.loss_fn = torch.nn.BCEWithLogitsLoss()
         self.channel_loss_fn = torch.nn.MSELoss()
         self.global_step = 0
-        self._val_dataloader: DataLoader | None = None
+        self._val_dataloaders: dict[str, DataLoader] = {}
         self._setup_validation()
 
     def train_step(self, batch: tuple[torch.Tensor, torch.Tensor, torch.Tensor]) -> dict[str, Any]:
@@ -87,7 +87,7 @@ class Trainer:
         data_iterator = iter(train_loader)
         progress = tqdm(total=num_steps, desc="train", dynamic_ncols=True)
 
-        val_enabled = self._val_dataloader is not None
+        val_enabled = bool(self._val_dataloaders)
         val_every_n = int(self.cfg.validation.every_n_steps) if val_enabled else 0
 
         while self.global_step < num_steps:
@@ -127,10 +127,11 @@ class Trainer:
                 val_metrics = self.validate()
                 if self.use_wandb:
                     log_metrics(self._format_val_metrics(val_metrics), step=self.global_step)
-                print(
-                    f"  [VAL] step={self.global_step} loss={val_metrics['loss']:.4f} "
-                    f"ber={val_metrics['ber']:.4f} bler={val_metrics['bler']:.4f}"
+                summary = " ".join(
+                    f"{name}: loss={metrics['loss']:.4f} ber={metrics['ber']:.4f} bler={metrics['bler']:.4f}"
+                    for name, metrics in val_metrics.items()
                 )
+                print(f"  [VAL] step={self.global_step} {summary}")
 
         progress.close()
 
@@ -215,22 +216,35 @@ class Trainer:
         if not self._validation_enabled():
             return
 
-        val_path = Path(self.cfg.validation.dataset_path)
-        if not val_path.exists():
-            print(f"[WARNING] Validation dataset not found: {val_path}")
-            print("  Run: python scripts/generate_datasets.py generation.split=val")
-            return
+        validation_cfg = self.cfg.validation
+        dataset_specs: list[tuple[str, Path]] = []
 
-        max_samples = self.cfg.validation.get("max_samples")
-        self._val_dataloader = build_cached_dataloader(
-            path=val_path,
-            batch_size=int(self.cfg.validation.batch_size),
-            max_samples=int(max_samples) if max_samples else None,
-            num_workers=0,
-            pin_memory=False,
-            shuffle=False,
-        )
-        print(f"[INFO] Validation dataset loaded: {val_path}")
+        profiles = validation_cfg.get("profiles")
+        if profiles:
+            data_dir = Path(str(validation_cfg.get("data_dir", "data/val")))
+            dataset_specs.extend((str(profile), data_dir / f"{profile}.pt") for profile in profiles)
+        elif validation_cfg.get("dataset_path"):
+            val_path = Path(str(validation_cfg.dataset_path))
+            dataset_specs.append((val_path.stem, val_path))
+
+        max_samples = validation_cfg.get("max_samples")
+        for name, path in dataset_specs:
+            if not path.exists():
+                print(f"[WARNING] Validation dataset not found: {path}")
+                continue
+
+            self._val_dataloaders[name] = build_cached_dataloader(
+                path=path,
+                batch_size=int(validation_cfg.batch_size),
+                max_samples=int(max_samples) if max_samples else None,
+                num_workers=0,
+                pin_memory=False,
+                shuffle=False,
+            )
+            print(f"[INFO] Validation dataset loaded: {path}")
+
+        if not self._val_dataloaders:
+            print("  Run: python scripts/generate_datasets.py generation.split=val")
 
     def _validation_enabled(self) -> bool:
         """Check if validation is configured and enabled."""
@@ -241,21 +255,16 @@ class Trainer:
         return True
 
     @staticmethod
-    def _format_val_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
+    def _format_val_metrics(metrics: dict[str, dict[str, Any]]) -> dict[str, Any]:
         """Namespace validation metrics for cleaner WandB plots."""
-        return {f"val/{key}": value for key, value in metrics.items()}
+        flattened: dict[str, Any] = {}
+        for dataset_name, dataset_metrics in metrics.items():
+            for key, value in dataset_metrics.items():
+                flattened[f"val/{dataset_name}/{key}"] = value
+        return flattened
 
     @torch.no_grad()
-    def validate(self) -> dict[str, Any]:
-        """Run validation on the cached validation dataset.
-
-        Returns:
-            Dictionary with aggregated validation metrics.
-        """
-        if self._val_dataloader is None:
-            return {}
-
-        self.model.eval()
+    def _validate_dataloader(self, dataloader: DataLoader) -> dict[str, Any]:
         total_loss = 0.0
         total_bit_errors = 0
         total_bits = 0
@@ -266,10 +275,9 @@ class Trainer:
         total_channel_mse = 0.0
         num_batches = 0
 
-        for batch in self._val_dataloader:
+        for batch in dataloader:
             batch: CachedNRXBatch
             features = batch.inputs.to(self.device)
-            # Flatten bit_labels to match training format
             targets = batch.bit_labels.flatten(start_dim=1).to(self.device)
             channel_targets = batch.channel_target.to(self.device)
 
@@ -277,11 +285,9 @@ class Trainer:
             logits = outputs["logits"]
             channel_estimate = outputs["channel_estimate"]
 
-            # Compute loss
             loss = self._compute_loss(outputs, targets, channel_targets)
             total_loss += float(loss.item())
 
-            # Compute metrics
             error_metrics = compute_batch_error_metrics(
                 logits,
                 targets,
@@ -307,8 +313,6 @@ class Trainer:
 
             num_batches += 1
 
-        self.model.train()
-
         return {
             "loss": total_loss / max(num_batches, 1),
             "ber": total_bit_errors / max(total_bits, 1),
@@ -317,3 +321,20 @@ class Trainer:
             "channel_mse": total_channel_mse / max(num_batches, 1),
             "num_samples": total_blocks,
         }
+
+    @torch.no_grad()
+    def validate(self) -> dict[str, dict[str, Any]]:
+        """Run validation on the cached validation dataset.
+
+        Returns:
+            Dictionary keyed by validation dataset name.
+        """
+        if not self._val_dataloaders:
+            return {}
+
+        self.model.eval()
+
+        metrics = {name: self._validate_dataloader(dataloader) for name, dataloader in self._val_dataloaders.items()}
+
+        self.model.train()
+        return metrics
