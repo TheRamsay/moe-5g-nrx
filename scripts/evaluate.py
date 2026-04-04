@@ -77,6 +77,7 @@ def evaluate_dataset(
     bits_per_symbol: int,
     channel_loss_weight: float,
     snr_bins: int | None = None,
+    failure_examples_limit: int = 20,
 ) -> dict[str, Any]:
     """Evaluate model on a dataset.
 
@@ -110,6 +111,8 @@ def evaluate_dataset(
     all_bit_errors: list[int] = []
     all_bits_per_sample: list[int] = []
     all_block_errors: list[int] = []
+    failure_examples: list[dict[str, Any]] = []
+    sample_offset = 0
 
     for batch in tqdm(dataloader, desc="Evaluating", unit="batch"):
         batch: CachedNRXBatch
@@ -143,11 +146,34 @@ def evaluate_dataset(
         per_sample_bit_errors = bit_errors.sum(dim=1).cpu().numpy()
         per_sample_bits = targets.shape[1]
         per_sample_block_error = error_metrics.block_errors.cpu().numpy().astype(int)
+        sample_ber = per_sample_bit_errors / max(per_sample_bits, 1)
 
         all_snr_db.extend(snr_db.numpy().tolist())
         all_bit_errors.extend(per_sample_bit_errors.tolist())
         all_bits_per_sample.extend([per_sample_bits] * len(snr_db))
         all_block_errors.extend(per_sample_block_error.tolist())
+
+        if failure_examples_limit > 0:
+            for idx, (sample_snr, sample_errors, sample_block_error, sample_ber_value) in enumerate(
+                zip(
+                    snr_db.numpy().tolist(),
+                    per_sample_bit_errors.tolist(),
+                    per_sample_block_error.tolist(),
+                    sample_ber.tolist(),
+                )
+            ):
+                failure_examples.append(
+                    {
+                        "sample_index": sample_offset + idx,
+                        "snr_db": float(sample_snr),
+                        "bit_errors": int(sample_errors),
+                        "bits_per_sample": int(per_sample_bits),
+                        "ber": float(sample_ber_value),
+                        "block_error": int(sample_block_error),
+                    }
+                )
+
+        sample_offset += len(snr_db)
 
         # Aggregate metrics
         total_bit_errors += int(bit_errors.sum().item())
@@ -192,6 +218,7 @@ def evaluate_dataset(
         bin_indices = np.clip(bin_indices, 0, snr_bins - 1)
 
         snr_binned = {}
+        snr_binned_rows: list[dict[str, Any]] = []
         for i in range(snr_bins):
             mask = bin_indices == i
             if mask.sum() == 0:
@@ -208,8 +235,28 @@ def evaluate_dataset(
                 "bler": float(bin_bler),
                 "num_samples": int(mask.sum()),
             }
+            snr_binned_rows.append(
+                {
+                    "bin_index": i,
+                    "snr_min": float(bin_edges[i]),
+                    "snr_max": float(bin_edges[i + 1]),
+                    "snr_center": float(bin_center),
+                    "ber": float(bin_ber),
+                    "bler": float(bin_bler),
+                    "num_samples": int(mask.sum()),
+                }
+            )
 
         results["snr_binned"] = snr_binned
+        results["snr_binned_rows"] = snr_binned_rows
+
+    if failure_examples_limit > 0:
+        failure_examples_sorted = sorted(
+            failure_examples,
+            key=lambda row: (row["bit_errors"], row["block_error"], -row["snr_db"]),
+            reverse=True,
+        )
+        results["failure_examples"] = failure_examples_sorted[:failure_examples_limit]
 
     return results
 
@@ -309,6 +356,14 @@ def _init_wandb_eval_run(
     tags = list(dict.fromkeys(tags))
 
     config_payload = {
+        "registry": {
+            "run_role": "evaluation",
+            "study_slug": checkpoint_experiment.get("study_slug"),
+            "study_path": checkpoint_experiment.get("study_path"),
+            "question": checkpoint_experiment.get("question"),
+            "batch_name": batch_name,
+            "exp_name": exp_name,
+        },
         "evaluation": {
             "checkpoint": str(checkpoint_path),
             "profiles": dataset_names,
@@ -329,6 +384,13 @@ def _init_wandb_eval_run(
         job_type="evaluation",
         config=config_payload,
     )
+    if wandb.run is not None:
+        wandb.run.summary["registry/run_role"] = "evaluation"
+        wandb.run.summary["registry/batch_name"] = batch_name
+        wandb.run.summary["registry/exp_name"] = exp_name
+        wandb.run.summary["registry/study_slug"] = checkpoint_experiment.get("study_slug")
+        wandb.run.summary["registry/study_path"] = checkpoint_experiment.get("study_path")
+        wandb.run.summary["registry/question"] = checkpoint_experiment.get("question")
     return True
 
 
@@ -352,14 +414,52 @@ def _link_checkpoint_artifact(checkpoint: dict[str, Any], explicit_artifact_ref:
         print(f"[WARNING] Unable to link checkpoint artifact {artifact_ref}: {exc}")
 
 
-def _log_results_to_wandb(all_results: dict[str, dict[str, Any]]) -> None:
+def _log_results_to_wandb(
+    all_results: dict[str, dict[str, Any]],
+    *,
+    checkpoint: dict[str, Any],
+    checkpoint_path: Path,
+    checkpoint_artifact: str | None,
+) -> None:
     if wandb.run is None:
         return
 
     scalar_metrics: dict[str, Any] = {}
-    summary_table = wandb.Table(
-        columns=["profile", "loss_total", "loss_bce", "ber", "bler", "ser", "channel_mse", "num_samples"]
+    checkpoint_cfg = checkpoint.get("config", {}) if isinstance(checkpoint, dict) else {}
+    experiment_cfg = checkpoint_cfg.get("experiment", {}) if isinstance(checkpoint_cfg, dict) else {}
+    source_checkpoint = checkpoint_artifact or wandb.run.summary.get("artifacts/source_checkpoint")
+    wandb_info = checkpoint.get("wandb") if isinstance(checkpoint, dict) else {}
+
+    comparison_table = wandb.Table(
+        columns=[
+            "profile",
+            "study_slug",
+            "study_path",
+            "batch_name",
+            "exp_name",
+            "source_train_run_path",
+            "checkpoint_path",
+            "checkpoint_artifact",
+            "global_step",
+            "num_parameters",
+            "loss_total",
+            "loss_bce",
+            "ber",
+            "bler",
+            "ser",
+            "channel_mse",
+            "num_samples",
+            "dataset_artifact",
+        ]
     )
+    snr_table = wandb.Table(
+        columns=["profile", "bin_index", "snr_min", "snr_max", "snr_center", "ber", "bler", "num_samples"]
+    )
+    failure_table = wandb.Table(
+        columns=["profile", "sample_index", "snr_db", "bit_errors", "bits_per_sample", "ber", "block_error"]
+    )
+    snr_row_count = 0
+    failure_row_count = 0
 
     for profile, results in all_results.items():
         scalar_metrics[f"eval/{profile}/loss_total"] = results["loss_total"]
@@ -369,8 +469,18 @@ def _log_results_to_wandb(all_results: dict[str, dict[str, Any]]) -> None:
         scalar_metrics[f"eval/{profile}/ser"] = results["ser"]
         scalar_metrics[f"eval/{profile}/channel_mse"] = results["channel_mse"]
         scalar_metrics[f"eval/{profile}/num_samples"] = results["num_samples"]
-        summary_table.add_data(
+        dataset_artifact = wandb.run.summary.get(f"artifacts/dataset/{profile}")
+        comparison_table.add_data(
             profile,
+            experiment_cfg.get("study_slug"),
+            experiment_cfg.get("study_path"),
+            experiment_cfg.get("batch_name"),
+            experiment_cfg.get("exp_name"),
+            wandb_info.get("run_path") if isinstance(wandb_info, dict) else None,
+            str(checkpoint_path),
+            source_checkpoint,
+            checkpoint.get("global_step"),
+            wandb.run.summary.get("model/num_parameters"),
             results["loss_total"],
             results["loss_bce"],
             results["ber"],
@@ -378,10 +488,44 @@ def _log_results_to_wandb(all_results: dict[str, dict[str, Any]]) -> None:
             results["ser"],
             results["channel_mse"],
             results["num_samples"],
+            dataset_artifact,
         )
 
+        for snr_row in results.get("snr_binned_rows", []):
+            snr_table.add_data(
+                profile,
+                snr_row["bin_index"],
+                snr_row["snr_min"],
+                snr_row["snr_max"],
+                snr_row["snr_center"],
+                snr_row["ber"],
+                snr_row["bler"],
+                snr_row["num_samples"],
+            )
+            snr_row_count += 1
+
+        for failure_row in results.get("failure_examples", []):
+            failure_table.add_data(
+                profile,
+                failure_row["sample_index"],
+                failure_row["snr_db"],
+                failure_row["bit_errors"],
+                failure_row["bits_per_sample"],
+                failure_row["ber"],
+                failure_row["block_error"],
+            )
+            failure_row_count += 1
+
     wandb.log(scalar_metrics)
-    wandb.log({"eval/summary": summary_table})
+    tables_to_log: dict[str, Any] = {
+        "eval/comparison": comparison_table,
+        "eval/summary": comparison_table,
+    }
+    if snr_row_count > 0:
+        tables_to_log["eval/snr_binned"] = snr_table
+    if failure_row_count > 0:
+        tables_to_log["eval/failures"] = failure_table
+    wandb.log(tables_to_log)
 
     for key, value in scalar_metrics.items():
         wandb.run.summary[key] = value
@@ -427,6 +571,9 @@ def main(cfg: DictConfig) -> None:
     _init_wandb_eval_run(cfg, config, checkpoint_path, [name for name, _ in datasets])
     _link_checkpoint_artifact(checkpoint, str(checkpoint_artifact) if checkpoint_artifact is not None else None)
     if wandb.run is not None:
+        wandb_info = checkpoint.get("wandb") if isinstance(checkpoint, dict) else None
+        if isinstance(wandb_info, dict):
+            wandb.run.summary["registry/source_train_run_path"] = wandb_info.get("run_path")
         wandb.run.summary["model/num_parameters"] = num_parameters
         wandb.run.summary["model/global_step"] = checkpoint["global_step"]
         wandb.run.summary["model/name"] = str(config["model"]["name"])
@@ -455,6 +602,7 @@ def main(cfg: DictConfig) -> None:
             bits_per_symbol=bits_per_symbol,
             channel_loss_weight=channel_loss_weight,
             snr_bins=int(eval_cfg.snr_bins) if eval_cfg.snr_bins is not None else None,
+            failure_examples_limit=int(eval_cfg.get("failure_examples_limit", 20)),
         )
         all_results[name] = results
         print_results(results, name)
@@ -469,7 +617,12 @@ def main(cfg: DictConfig) -> None:
         for name, results in all_results.items():
             print(f"  {name:>10} | {results['bler']:10.4f} | {results['ber']:12.6e} | {results['loss_total']:10.6f}")
 
-    _log_results_to_wandb(all_results)
+    _log_results_to_wandb(
+        all_results,
+        checkpoint=checkpoint,
+        checkpoint_path=checkpoint_path,
+        checkpoint_artifact=str(checkpoint_artifact) if checkpoint_artifact is not None else None,
+    )
     if wandb.run is not None:
         wandb.finish()
 

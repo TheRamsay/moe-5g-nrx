@@ -61,6 +61,12 @@ def setup_generation_wandb(cfg: DictConfig) -> bool:
 
     raw_config = OmegaConf.to_container(cfg, resolve=True)
     config_payload = raw_config if isinstance(raw_config, dict) else {}
+    registry_cfg = config_payload.setdefault("registry", {}) if isinstance(config_payload, dict) else {}
+    if isinstance(registry_cfg, dict):
+        registry_cfg["run_role"] = "data_generation"
+        registry_cfg["study_slug"] = _cfg_get(cfg, "experiment.study_slug")
+        registry_cfg["study_path"] = _cfg_get(cfg, "experiment.study_path")
+        registry_cfg["question"] = _cfg_get(cfg, "experiment.question")
 
     wandb.init(
         project=project,
@@ -71,6 +77,11 @@ def setup_generation_wandb(cfg: DictConfig) -> bool:
         job_type="data_generation",
         config=config_payload,
     )
+    if wandb.run is not None:
+        wandb.run.summary["registry/run_role"] = "data_generation"
+        wandb.run.summary["registry/study_slug"] = _cfg_get(cfg, "experiment.study_slug")
+        wandb.run.summary["registry/study_path"] = _cfg_get(cfg, "experiment.study_path")
+        wandb.run.summary["registry/question"] = _cfg_get(cfg, "experiment.question")
     return True
 
 

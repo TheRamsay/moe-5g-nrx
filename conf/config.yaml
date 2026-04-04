@@ -62,12 +62,16 @@ evaluation:
     log_to_wandb: true
     use_artifacts: true
     dataset_artifact_alias: latest
+    failure_examples_limit: 20
 
 experiment:
     batch_name: null
     exp_name: null
     tags: []
     notes: null
+    study_slug: null
+    study_path: null
+    question: null
 
 generation:
     output_dir: data

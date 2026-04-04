@@ -278,6 +278,20 @@ This creates a WandB report page with:
 - parameter-count vs BLER scatter plots
 - a run comparer for dense baseline/capacity runs
 
+Registry and evaluation tables:
+
+- every train/eval run now records:
+  - `registry/run_role`
+  - `registry/study_slug`
+  - `registry/study_path`
+  - `registry/question`
+- evaluation runs log structured tables:
+  - `eval/comparison` - one row per profile with study/checkpoint/dataset lineage
+  - `eval/snr_binned` - one row per SNR bin and profile
+  - `eval/failures` - top hard examples ranked by bit errors
+
+These tables are intended to make WandB the experiment registry while keeping artifacts as the source of truth for datasets and checkpoints.
+
 ## Results
 
 ```

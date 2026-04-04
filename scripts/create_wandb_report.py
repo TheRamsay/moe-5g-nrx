@@ -18,10 +18,13 @@ if str(PROJECT_ROOT) not in sys.path:
 from wandb_workspaces.reports import v2 as wr  # noqa: E402
 
 
-def _dense_run_filter(cfg: DictConfig) -> str:
-    groups = [str(group) for group in cfg.reporting.get("train_groups", [])]
+def _dense_run_filter(groups: list[str], run_role: str) -> str:
     quoted_groups = ", ".join(f"'{group}'" for group in groups)
-    return f"Config('experiment.batch_name') in [{quoted_groups}] and Config('model.family') = 'static_dense'"
+    return (
+        f"Config('experiment.batch_name') in [{quoted_groups}] "
+        f"and Config('model.family') = 'static_dense' "
+        f"and Config('registry.run_role') = '{run_role}'"
+    )
 
 
 def _panel_grid(runset: wr.Runset, panels: list[object]) -> wr.PanelGrid:
@@ -35,11 +38,20 @@ def main(cfg: DictConfig) -> None:
     if not entity:
         raise ValueError("logging.entity must be set to create a shared WandB report")
 
-    dense_runs = wr.Runset(
+    train_groups = [str(group) for group in cfg.reporting.get("train_groups", [])]
+    eval_groups = [str(group) for group in cfg.reporting.get("eval_groups", train_groups)]
+
+    train_runs = wr.Runset(
         entity=str(entity),
         project=project,
-        name="Dense study runs",
-        filters=_dense_run_filter(cfg),
+        name="Dense training runs",
+        filters=_dense_run_filter(train_groups, str(cfg.reporting.get("train_job_type", "train"))),
+    )
+    eval_runs = wr.Runset(
+        entity=str(entity),
+        project=project,
+        name="Dense evaluation runs",
+        filters=_dense_run_filter(eval_groups, str(cfg.reporting.get("eval_job_type", "evaluation"))),
     )
 
     report = wr.Report(
@@ -56,16 +68,16 @@ def main(cfg: DictConfig) -> None:
             wr.TableOfContents(),
             wr.MarkdownBlock("## Training Curves"),
             _panel_grid(
-                dense_runs,
+                train_runs,
                 [
                     wr.LinePlot(title="Training Loss", y=[wr.Metric("train/loss")]),
-                    wr.LinePlot(title="Validation BLER on UMa", y=[wr.Metric("val/uma/bler")]),
-                    wr.LinePlot(title="Validation BLER on TDL-C", y=[wr.Metric("val/tdlc/bler")]),
+                    wr.LinePlot(title="Validation BER on UMa", y=[wr.Metric("val/uma/ber")]),
+                    wr.LinePlot(title="Validation BER on TDL-C", y=[wr.Metric("val/tdlc/ber")]),
                 ],
             ),
             wr.MarkdownBlock("## Final Evaluation"),
             _panel_grid(
-                dense_runs,
+                eval_runs,
                 [
                     wr.BarPlot(
                         title="Test BLER by Profile",
@@ -81,7 +93,7 @@ def main(cfg: DictConfig) -> None:
             ),
             wr.MarkdownBlock("## Capacity Tradeoffs"),
             _panel_grid(
-                dense_runs,
+                eval_runs,
                 [
                     wr.ScatterPlot(
                         title="Parameters vs TDL-C BLER",
@@ -95,12 +107,18 @@ def main(cfg: DictConfig) -> None:
                     ),
                 ],
             ),
-            wr.MarkdownBlock("## Run Comparison"),
+            wr.MarkdownBlock("## Evaluation Comparison Table"),
             _panel_grid(
-                dense_runs,
+                eval_runs,
                 [
                     wr.RunComparer(diff_only="split"),
                 ],
+            ),
+            wr.MarkdownBlock(
+                "## Lineage\n"
+                "Use the evaluation run summaries to trace each point back to the source checkpoint artifact, "
+                "the dataset artifacts used for `uma` / `tdlc`, and the local study folder recorded in "
+                "`registry/study_path`."
             ),
         ],
         width="fluid",

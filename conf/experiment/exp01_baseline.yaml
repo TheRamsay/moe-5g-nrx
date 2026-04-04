@@ -10,6 +10,9 @@ experiment:
   exp_name: dense_s56_b8_h48_bs32_lr1e3_s67
   tags: [baseline, dense, synthetic, simo-1x4, 16qam]
   notes: "Static dense single-user SIMO baseline trained on mixed UMa/TDL-C batches."
+  study_slug: 2026-03-29-dense-baseline-v1
+  study_path: experiments/2026-03-29-dense-baseline-v1
+  question: What is the canonical static dense baseline we will compare MoE against?
 
 training:
   max_steps: 10000

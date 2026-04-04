@@ -94,6 +94,16 @@ def setup_wandb(cfg: DictConfig, job_id: str | None = None, *, job_type: str = "
         config_dict = {}
 
     try:
+        registry_cfg = config_dict.setdefault("registry", {})
+        if isinstance(registry_cfg, dict):
+            registry_cfg["run_role"] = job_type
+            registry_cfg["job_id"] = job_id
+            registry_cfg["batch_name"] = batch_name
+            registry_cfg["exp_name"] = exp_name
+            registry_cfg["study_slug"] = _cfg_get(cfg, "experiment.study_slug")
+            registry_cfg["study_path"] = _cfg_get(cfg, "experiment.study_path")
+            registry_cfg["question"] = _cfg_get(cfg, "experiment.question")
+
         wandb.init(
             project=str(project_name),
             entity=str(entity) if entity else None,
@@ -105,6 +115,14 @@ def setup_wandb(cfg: DictConfig, job_id: str | None = None, *, job_type: str = "
             config=config_dict,
             save_code=log_code,
         )
+        if wandb.run is not None:
+            wandb.run.summary["registry/run_role"] = job_type
+            wandb.run.summary["registry/job_id"] = job_id
+            wandb.run.summary["registry/batch_name"] = batch_name
+            wandb.run.summary["registry/exp_name"] = exp_name
+            wandb.run.summary["registry/study_slug"] = _cfg_get(cfg, "experiment.study_slug")
+            wandb.run.summary["registry/study_path"] = _cfg_get(cfg, "experiment.study_path")
+            wandb.run.summary["registry/question"] = _cfg_get(cfg, "experiment.question")
         return True
     except Exception as e:
         print(f"[WARNING] Failed to initialize wandb: {e}")
