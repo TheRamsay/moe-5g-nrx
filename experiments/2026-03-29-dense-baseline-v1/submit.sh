@@ -10,6 +10,7 @@ RUNTIME_DEVICE="${RUNTIME_DEVICE:-cuda}"
 WALLTIME="${WALLTIME:-08:00:00}"
 CHECKPOINT_DIR="${CHECKPOINT_DIR:-}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
+SELECT_RESOURCES="${SELECT_RESOURCES:-}"
 
 if [[ -z "$CHECKPOINT_DIR" ]]; then
   if [[ "$MODE" == "local" ]]; then
@@ -31,6 +32,9 @@ echo "Mode: $MODE"
 echo "Data root: $DATA_ROOT"
 echo "Runtime device: $RUNTIME_DEVICE"
 echo "Walltime: $WALLTIME"
+if [[ -n "$SELECT_RESOURCES" ]]; then
+  echo "Select resources: $SELECT_RESOURCES"
+fi
 echo
 
 build_run_args() {
@@ -68,7 +72,11 @@ case "$MODE" in
   qsub)
     for exp in "${EXPERIMENTS[@]}"; do
       echo ">>> Submitting $exp"
-      qsub -l "walltime=$WALLTIME" -v "RUN_ARGS=$(build_run_args "$exp")" scripts/metacentrum_job.sh
+      qsub_args=(-l "walltime=$WALLTIME")
+      if [[ -n "$SELECT_RESOURCES" ]]; then
+        qsub_args+=(-l "$SELECT_RESOURCES")
+      fi
+      qsub "${qsub_args[@]}" -v "RUN_ARGS=$(build_run_args "$exp")" scripts/metacentrum_job.sh
     done
     ;;
   *)

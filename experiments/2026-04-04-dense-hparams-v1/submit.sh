@@ -18,6 +18,7 @@ VALIDATION_EVERY_N_STEPS="${VALIDATION_EVERY_N_STEPS:-500}"
 LEARNING_RATES_STRING="${LEARNING_RATES:-3e-4 1e-3 3e-3}"
 WEIGHT_DECAYS_STRING="${WEIGHT_DECAYS:-0 1e-4}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
+SELECT_RESOURCES="${SELECT_RESOURCES:-}"
 
 if [[ -z "$BASE_EXPERIMENT" ]]; then
   echo "BASE_EXPERIMENT is required, e.g. BASE_EXPERIMENT=exp04_dense_capacity_mid"
@@ -57,6 +58,9 @@ echo "Base label: $BASE_LABEL"
 echo "Data root: $DATA_ROOT"
 echo "Runtime device: $RUNTIME_DEVICE"
 echo "Walltime: $WALLTIME"
+if [[ -n "$SELECT_RESOURCES" ]]; then
+  echo "Select resources: $SELECT_RESOURCES"
+fi
 echo "Learning rates: ${LEARNING_RATES[*]}"
 echo "Weight decays: ${WEIGHT_DECAYS[*]}"
 echo
@@ -127,7 +131,11 @@ case "$MODE" in
     for lr in "${LEARNING_RATES[@]}"; do
       for wd in "${WEIGHT_DECAYS[@]}"; do
         echo ">>> Submitting lr=$lr wd=$wd"
-        qsub -l "walltime=$WALLTIME" -v "RUN_ARGS=$(build_run_args "$lr" "$wd")" scripts/metacentrum_job.sh
+        qsub_args=(-l "walltime=$WALLTIME")
+        if [[ -n "$SELECT_RESOURCES" ]]; then
+          qsub_args+=(-l "$SELECT_RESOURCES")
+        fi
+        qsub "${qsub_args[@]}" -v "RUN_ARGS=$(build_run_args "$lr" "$wd")" scripts/metacentrum_job.sh
       done
     done
     ;;

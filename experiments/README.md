@@ -93,8 +93,18 @@ Study `submit.sh` helpers now assume the following environment variables:
 - `WALLTIME` - PBS walltime used in `qsub` mode, default `08:00:00`
 - `CHECKPOINT_DIR` - checkpoint path inside the run, default `../artifacts/checkpoints`
 - `EXTRA_ARGS` - extra Hydra overrides appended to every run
+- `SELECT_RESOURCES` - optional PBS `select=...` override for targeting a specific GPU class
 
 This makes the study folder the human-facing launch manifest while keeping the actual experiment preset in `conf/experiment/`.
+
+Examples:
+
+- 16 GB GPU class:
+  - `SELECT_RESOURCES='select=1:ncpus=4:ngpus=1:mem=24gb:scratch_ssd=40gb:gpu_mem=16384mb'`
+- 12 GB GPU class:
+  - `SELECT_RESOURCES='select=1:ncpus=4:ngpus=1:mem=24gb:scratch_ssd=40gb:gpu_mem=12288mb'`
+
+Use the 16 GB class by default for dense training. The 12 GB / 11 GB classes available on MetaCentrum are older GPUs and may be noticeably slower.
 
 `local` mode is only intended for environments where the Sionna/TensorFlow stack is already working. On machines without the required Mitsuba/LLVM runtime, prefer `print` or cluster `qsub` mode.
 
