@@ -69,7 +69,7 @@ Evaluation from the best checkpoint artifact:
 
 ```bash
 uv run python scripts/evaluate.py runtime.device=cuda \
-    evaluation.checkpoint_artifact=knn_moe-5g-nrx/moe-5g-nrx/model-<run-id>:best
+    evaluation.checkpoint_artifact=knn_moe-5g-nrx/moe-5g-nrx/model-<exp-name>-<run-id>:best
 ```
 
 Or from this folder:
@@ -108,7 +108,7 @@ bash submit.sh qsub
 ## Reporting
 
 - WandB report URL: add after first full run
-- Selection checkpoint: prefer `model-<run-id>:best` over `:latest`
+- Selection checkpoint: prefer `model-<exp-name>-<run-id>:best` over `:latest`
 
 ## Relationship to Capacity Sweep
 

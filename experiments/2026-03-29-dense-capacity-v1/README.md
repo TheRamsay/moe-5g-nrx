@@ -121,7 +121,7 @@ Or evaluate directly from the best checkpoint artifact:
 
 ```bash
 uv run python scripts/evaluate.py runtime.device=cuda \
-    evaluation.checkpoint_artifact=knn_moe-5g-nrx/moe-5g-nrx/model-<run-id>:best
+    evaluation.checkpoint_artifact=knn_moe-5g-nrx/moe-5g-nrx/model-<exp-name>-<run-id>:best
 ```
 
 ## Current Status
@@ -145,7 +145,7 @@ uv run python scripts/evaluate.py runtime.device=cuda \
 ## Reporting
 
 - WandB report URL: add after the first full sweep
-- Preferred test input: `model-<run-id>:best` evaluated on cached `$DATA_ROOT/test/{uma,tdlc}.pt`
+- Preferred test input: `model-<exp-name>-<run-id>:best` evaluated on cached `$DATA_ROOT/test/{uma,tdlc}.pt`
 
 ## Next Step After This Study
 

@@ -118,12 +118,26 @@ def log_dataset_artifact(
     return ref
 
 
-def build_checkpoint_artifact_name(run_id: str) -> str:
-    return f"model-{_sanitize_artifact_component(run_id)}"
+def build_checkpoint_artifact_name(run_id: str, *, exp_name: str | None = None, model_name: str | None = None) -> str:
+    base_name = exp_name or model_name or run_id
+    return f"model-{_sanitize_artifact_component(str(base_name))}-{_sanitize_artifact_component(run_id)}"
 
 
-def build_checkpoint_artifact_ref(project: str, entity: str | None, run_id: str, alias: str = "latest") -> str:
-    return _artifact_ref(project, entity, build_checkpoint_artifact_name(run_id), alias)
+def build_checkpoint_artifact_ref(
+    project: str,
+    entity: str | None,
+    run_id: str,
+    alias: str = "latest",
+    *,
+    exp_name: str | None = None,
+    model_name: str | None = None,
+) -> str:
+    return _artifact_ref(
+        project,
+        entity,
+        build_checkpoint_artifact_name(run_id, exp_name=exp_name, model_name=model_name),
+        alias,
+    )
 
 
 def log_checkpoint_artifact(
@@ -136,7 +150,11 @@ def log_checkpoint_artifact(
         return None
 
     path = Path(checkpoint_path)
-    artifact_name = build_checkpoint_artifact_name(wandb.run.id)
+    artifact_name = build_checkpoint_artifact_name(
+        wandb.run.id,
+        exp_name=str(metadata.get("experiment_name")) if metadata.get("experiment_name") else None,
+        model_name=str(metadata.get("model_name")) if metadata.get("model_name") else None,
+    )
     artifact = wandb.Artifact(
         artifact_name,
         type="model",

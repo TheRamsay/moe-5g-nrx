@@ -255,12 +255,12 @@ uv run python scripts/evaluate.py evaluation.checkpoint=checkpoints/static_dense
 
 # Or evaluate directly from a checkpoint artifact reference
 uv run python scripts/evaluate.py \
-    evaluation.checkpoint_artifact=your-entity/moe-5g-nrx/model-<run-id>:latest \
+    evaluation.checkpoint_artifact=your-entity/moe-5g-nrx/model-<exp-name>-<run-id>:latest \
     evaluation.profiles=[uma,tdlc]
 
 # Use the best validation checkpoint artifact instead of the final one
 uv run python scripts/evaluate.py \
-    evaluation.checkpoint_artifact=your-entity/moe-5g-nrx/model-<run-id>:best \
+    evaluation.checkpoint_artifact=your-entity/moe-5g-nrx/model-<exp-name>-<run-id>:best \
     evaluation.profiles=[uma,tdlc]
 ```
 

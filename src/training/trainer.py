@@ -183,6 +183,8 @@ class Trainer:
                     wandb.run.entity,
                     wandb.run.id,
                     alias=artifact_primary_alias,
+                    exp_name=self.cfg.experiment.get("exp_name"),
+                    model_name=self.cfg.model.name,
                 )
 
         torch.save(
