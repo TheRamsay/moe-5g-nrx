@@ -34,7 +34,7 @@ training:
         every_n_steps: 500
         save_latest: true
         save_best: true
-        best_metric: bler
+        best_metric: ber
         best_metric_mode: min
         best_metric_aggregation: mean
         best_profiles: ${validation.profiles}
@@ -51,7 +51,7 @@ validation:
 evaluation:
     checkpoint: checkpoints/static_dense_nrx.pt
     checkpoint_artifact: null
-    dataset_path: data/test/mixed.pt
+    dataset_path: null
     batch_size: 64
     max_samples: null
     all_profiles: false
@@ -75,7 +75,7 @@ generation:
     batch_size: 64
     split: both          # val | test | both
     profiles: [uma, tdlc]
-    include_mixed: true
+    include_mixed: false
     base_seed: 67
     log_to_wandb: true
     artifact_aliases: [latest]

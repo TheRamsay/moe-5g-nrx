@@ -197,6 +197,8 @@ By default training now writes:
 - `<checkpoint_dir>/<model>_latest.pt` for the latest periodic checkpoint
 - `<checkpoint_dir>/<model>_best.pt` for the best validation checkpoint
 
+For dense baselines, the default best-checkpoint selection metric is the mean validation `ber` across `uma` and `tdlc`.
+
 ### Test Evaluation (Post-Training Only)
 
 Test datasets are used **only after training completes**:
@@ -238,8 +240,11 @@ export WANDB_ENTITY=your-username
 Artifact workflow:
 
 ```bash
-# Generate cached val/test datasets and log dataset artifacts
-uv run python scripts/generate_datasets.py generation.split=both
+# Generate cached validation datasets once and reuse them across runs
+uv run python scripts/generate_datasets.py generation.split=val generation.num_samples=8192
+
+# Generate cached test datasets once and reuse them across runs
+uv run python scripts/generate_datasets.py generation.split=test generation.num_samples=32768
 
 # Train and log the final checkpoint as a model artifact
 uv run python main.py experiment=exp01_baseline
@@ -258,6 +263,8 @@ uv run python scripts/evaluate.py \
     evaluation.checkpoint_artifact=your-entity/moe-5g-nrx/model-<run-id>:best \
     evaluation.profiles=[uma,tdlc]
 ```
+
+The `manual-smoke` datasets (`1024` samples/profile) are only for plumbing checks. For real dense experiments, regenerate larger cached validation and test sets and reuse them for the whole study.
 
 Report workflow:
 
