@@ -42,6 +42,11 @@ bash experiments/2026-03-29-your-study/submit.sh
 ```text
 experiments/
 ├── README.md
+├── resources/
+│   ├── README.md
+│   ├── gpu-12gb.sh
+│   ├── gpu-16gb.sh
+│   └── gpu-46gb.sh
 ├── template.sh
 ├── 2026-03-29-dense-baseline-v1/
 │   ├── README.md
@@ -97,6 +102,16 @@ Study `submit.sh` helpers now assume the following environment variables:
 
 This makes the study folder the human-facing launch manifest while keeping the actual experiment preset in `conf/experiment/`.
 
+You can source a reusable resource preset before submitting or opening an interactive job:
+
+```bash
+source experiments/resources/gpu-16gb.sh
+bash experiments/2026-03-29-dense-baseline-v1/submit.sh qsub
+
+source experiments/resources/gpu-16gb.sh
+./scripts/metacentrum_interactive.sh 2
+```
+
 Examples:
 
 - 16 GB GPU class:
@@ -113,3 +128,9 @@ Use the 16 GB class by default for dense training. The 12 GB / 11 GB classes ava
 - `2026-03-29-dense-baseline-v1/` - canonical single-run dense baseline reference
 - `2026-03-29-dense-capacity-v1/` - dense baseline capacity sweep
 - `2026-04-04-dense-hparams-v1/` - optimizer sweep for the selected dense capacity
+
+## Resource Presets
+
+- `experiments/resources/gpu-16gb.sh` is the recommended default for dense runs
+- `experiments/resources/gpu-12gb.sh` is mainly for small smoke tests
+- `experiments/resources/gpu-46gb.sh` is useful when you want extra headroom

@@ -103,7 +103,13 @@ bash submit.sh qsub
 
 | Config | Status | Notes |
 |---|---|---|
-| `exp01_baseline` | active | record final `run-id`, `job id`, and chosen `:best` checkpoint artifact here |
+| `exp01_baseline` | finished | run `lpvxz7ij`, job `18695927.pbs-m1.metacentrum.cz`, best checkpoint `model-dense_s56_b8_h48_bs32_lr1e3_s67-lpvxz7ij:best`, best step `9000`, mean val BER `0.2029` |
+
+Validation snapshot at best checkpoint:
+
+- `val/uma/ber = 0.2782`
+- `val/tdlc/ber = 0.1286`
+- `checkpoint/best_score = 0.2029`
 
 ## Reporting
 

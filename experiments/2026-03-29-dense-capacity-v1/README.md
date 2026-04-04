@@ -138,9 +138,30 @@ uv run python scripts/evaluate.py runtime.device=cuda \
 
 | Config | Status | Best metric seen | Notes |
 |---|---|---|---|
-| `exp03_dense_capacity_small` | active | - | record `run-id`, `job id`, and `:best` checkpoint artifact |
-| `exp04_dense_capacity_mid` | active | - | record `run-id`, `job id`, and `:best` checkpoint artifact |
-| `exp05_dense_capacity_large` | active | - | record `run-id`, `job id`, and `:best` checkpoint artifact |
+| `exp03_dense_capacity_small` | finished | `0.20483` | run `11l9l1mi`, job `18696335.pbs-m1.metacentrum.cz`, best checkpoint `model-dense_small_s56_b8_h32_bs32_lr1e3_s67-11l9l1mi:best` |
+| `exp04_dense_capacity_mid` | finished | `0.20270` | run `f3amf8bv`, job `18696336.pbs-m1.metacentrum.cz`, best checkpoint `model-dense_mid_s56_b8_h48_bs32_lr1e3_s67-f3amf8bv:best`, test eval run `ah343vmv` |
+| `exp05_dense_capacity_large` | finished | `0.20100` | run `re5dgp3s`, job `18696337.pbs-m1.metacentrum.cz`, best checkpoint `model-dense_large_s56_b8_h64_bs32_lr1e3_s67-re5dgp3s:best`, test eval run `9giog1ug` |
+
+Validation snapshot:
+
+| Model | Params | `val/uma/ber` | `val/tdlc/ber` | `checkpoint/best_score` |
+|---|---:|---:|---:|---:|
+| small | 168,324 | 0.27944 | 0.13022 | 0.20483 |
+| mid | 305,924 | 0.27762 | 0.12777 | 0.20270 |
+| large | 449,540 | 0.27587 | 0.12613 | 0.20100 |
+
+Test snapshot:
+
+| Model | `eval/uma/ber` | `eval/uma/bler` | `eval/tdlc/ber` | `eval/tdlc/bler` |
+|---|---:|---:|---:|---:|
+| mid | 0.27435 | 0.95016 | 0.12839 | 0.91498 |
+| large | 0.27256 | 0.95035 | 0.12679 | 0.91095 |
+
+Current interpretation:
+
+- `large` is the strongest raw dense model on both validation and test BER.
+- `mid` is very close, so it remains the better efficiency tradeoff candidate.
+- The sweep winner for optimizer tuning is `large`.
 
 ## Reporting
 

@@ -57,14 +57,14 @@ Examples:
 Print the commands first:
 
 ```bash
-BASE_EXPERIMENT=exp04_dense_capacity_mid \
+BASE_EXPERIMENT=exp05_dense_capacity_large \
 bash experiments/2026-04-04-dense-hparams-v1/submit.sh print
 ```
 
 Submit the full sweep:
 
 ```bash
-BASE_EXPERIMENT=exp04_dense_capacity_mid \
+BASE_EXPERIMENT=exp05_dense_capacity_large \
 DATA_ROOT=$HOME/moe-5g-datasets/dense-v1 \
 bash experiments/2026-04-04-dense-hparams-v1/submit.sh qsub
 ```
@@ -72,7 +72,7 @@ bash experiments/2026-04-04-dense-hparams-v1/submit.sh qsub
 Adjust the grid if needed:
 
 ```bash
-BASE_EXPERIMENT=exp04_dense_capacity_mid \
+BASE_EXPERIMENT=exp05_dense_capacity_large \
 LEARNING_RATES='5e-4 1e-3 2e-3' \
 WEIGHT_DECAYS='0 1e-5 1e-4' \
 MAX_STEPS=12000 \
@@ -82,7 +82,7 @@ bash experiments/2026-04-04-dense-hparams-v1/submit.sh qsub
 
 ## What Is Fixed
 
-- base dense architecture is inherited from `BASE_EXPERIMENT`
+- base dense architecture is inherited from `BASE_EXPERIMENT` (currently `exp05_dense_capacity_large`)
 - training dataset: online Sionna mixed generator (`uma` + `tdlc`)
 - validation dataset: cached Sionna-generated `uma` + `tdlc`
 - seed: `67`
@@ -98,12 +98,12 @@ bash experiments/2026-04-04-dense-hparams-v1/submit.sh qsub
 
 | Base experiment | Run | Best metric seen | Notes |
 |---|---|---|---|
-| `<fill after capacity winner>` | `lr3e-4_wd0` | - | |
-| `<fill after capacity winner>` | `lr3e-4_wd1e-4` | - | |
-| `<fill after capacity winner>` | `lr1e-3_wd0` | - | |
-| `<fill after capacity winner>` | `lr1e-3_wd1e-4` | - | |
-| `<fill after capacity winner>` | `lr3e-3_wd0` | - | |
-| `<fill after capacity winner>` | `lr3e-3_wd1e-4` | - | |
+| `exp05_dense_capacity_large` | `lr3e-4_wd0` | - | pending |
+| `exp05_dense_capacity_large` | `lr3e-4_wd1e-4` | - | pending |
+| `exp05_dense_capacity_large` | `lr1e-3_wd0` | - | pending |
+| `exp05_dense_capacity_large` | `lr1e-3_wd1e-4` | - | pending |
+| `exp05_dense_capacity_large` | `lr3e-3_wd0` | - | pending |
+| `exp05_dense_capacity_large` | `lr3e-3_wd1e-4` | - | pending |
 
 ## Reporting
 
