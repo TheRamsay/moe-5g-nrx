@@ -22,17 +22,12 @@ data:
     num_subcarriers: 128
     num_ofdm_symbols: 14
     bits_per_symbol: 4
-    train_samples: 65536
-    snr_db_range: [0.0, 24.0]
-    channel_estimator_noise_std: 0.15
-    channel_variation: 0.25
 
 training:
     batch_size: 32
     learning_rate: 0.001
     weight_decay: 0.0001
     gradient_clip_norm: 1.0
-    num_workers: 0
     max_steps: 10000
     checkpoint_dir: checkpoints
 
@@ -68,7 +63,7 @@ generation:
     num_samples: 32768
     batch_size: 64
     split: both          # val | test | both
-    profiles: [tdlc, uma]
+    profiles: [uma, tdlc]
     include_mixed: true
     base_seed: 67
 

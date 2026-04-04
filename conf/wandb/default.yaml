@@ -1,8 +1,5 @@
 # @package _global_
 logging:
-  use_wandb: true
-  log_every_n_steps: 50
-  
   # Wandb-specific settings
   project: moe-5g-nrx
   entity: null  # Set to your wandb username/team

@@ -3,30 +3,13 @@
 
 defaults:
   - override /model: static_dense
+  - override /dataset: mixed
 
 experiment:
   batch_name: dense-capacity-v1
   exp_name: dense_large_s56_b8_h64_bs32_lr1e3_s67
   tags: [baseline, dense, capacity, synthetic, simo-1x4, 16qam]
   notes: "Large dense baseline for the capacity sweep (~450k parameters), trained on mixed UMa/TDL-C batches."
-
-dataset:
-  name: mixed
-  channel_profile: mixed
-  snr_db:
-    min: -10.0
-    max: 25.0
-  delay_spread_s: 5.0e-7
-  min_speed_mps: 0.0
-  max_speed_mps: 30.0
-  uma_cell_radius_m: 500.0
-  bs_height_m: 25.0
-  ut_height_m: 1.5
-  indoor_probability: 0.2
-  o2i_model: low
-  mixed:
-    profiles: [uma, tdlc]
-    strategy: alternate
 
 model:
   backbone:

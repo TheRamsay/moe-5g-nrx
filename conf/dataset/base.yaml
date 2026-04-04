@@ -1,10 +1,10 @@
-# Shared across all synthetic channel profiles (AWGN, UMa, TDL-C).
+# Shared across all supported synthetic channel profiles (UMa, TDL-C, mixed).
 # Channel-specific parameters are overridden per-profile in dedicated YAML files.
 
 name: base_defaults
 
-num_subcarriers: ${data.num_subcarriers}        # Frequency domain: 256 subcarriers
-num_ofdm_symbols: ${data.num_ofdm_symbols}        # Time domain: 14 OFDM symbols per slot
+num_subcarriers: ${data.num_subcarriers}
+num_ofdm_symbols: ${data.num_ofdm_symbols}
 
 modulation: qam16
 carrier_frequency_hz: 3500000000.0
@@ -17,9 +17,9 @@ pilot_spacing_time: ${model.backbone.pilot_symbol_indices}
 
 loader:
   num_workers: 0
-  pin_memory: false         # Pin PyTorch tensors to GPU memory (faster transfers)
+  pin_memory: false         # Pin host memory for faster transfer to GPU
   prefetch_factor: 2        # Batches to prefetch per worker (if num_workers > 0)
-  persistent_workers: True # Keep workers alive between epochs
+  persistent_workers: true  # Keep workers alive between epochs
 
 max_batches_per_epoch: 100
 
