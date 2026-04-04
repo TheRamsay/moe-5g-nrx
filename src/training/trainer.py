@@ -87,7 +87,7 @@ class Trainer:
         data_iterator = iter(train_loader)
         progress = tqdm(total=num_steps, desc="train", dynamic_ncols=True)
 
-        val_enabled = self._validation_enabled()
+        val_enabled = self._val_dataloader is not None
         val_every_n = int(self.cfg.validation.every_n_steps) if val_enabled else 0
 
         while self.global_step < num_steps:
@@ -218,7 +218,7 @@ class Trainer:
         val_path = Path(self.cfg.validation.dataset_path)
         if not val_path.exists():
             print(f"[WARNING] Validation dataset not found: {val_path}")
-            print("  Run: python scripts/generate_datasets.py --split val")
+            print("  Run: python scripts/generate_datasets.py generation.split=val")
             return
 
         max_samples = self.cfg.validation.get("max_samples")

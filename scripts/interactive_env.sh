@@ -102,12 +102,14 @@ sync_back() {
 
 # Quick experiment runner
 run_experiment() {
-    local args="${1:-model=moe}"
+    local args="${1:-model=static_dense dataset=mixed runtime.device=cuda}"
+    local run_args=()
     log "Running: python main.py $args"
+    read -r -a run_args <<< "$args"
     (
         cd "$WORK_ROOT"
         UV_PROJECT_ENVIRONMENT="$WORK_ROOT/.venv" \
-            "$UV_BIN" run --offline --python 3.10 python main.py "$args" 2>&1 | tee -a "$ARTIFACT_DIR/run.log"
+            "$UV_BIN" run --offline --python 3.10 python main.py "${run_args[@]}" 2>&1 | tee -a "$ARTIFACT_DIR/run.log"
     )
 }
 
@@ -184,4 +186,4 @@ cd "$WORK_ROOT"
 env_status
 
 log "Environment ready! You're in: $WORK_ROOT"
-log "Run experiments with: run_experiment 'model=moe training.batch_size=64'"
+log "Run experiments with: run_experiment 'experiment=exp01_baseline runtime.device=cuda'"

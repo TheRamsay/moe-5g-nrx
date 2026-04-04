@@ -8,6 +8,8 @@
 
 This is the single reference dense baseline run for the current project stage.
 
+It is trained on mixed UMa/TDL-C batches and should be evaluated on cached `uma` and `tdlc` test datasets separately.
+
 Use it when you want:
 
 - one clean baseline run
@@ -27,13 +29,20 @@ For model-size comparison, use `experiments/2026-03-29-dense-capacity-v1/` inste
 From the repository root:
 
 ```bash
-uv run python main.py experiment=exp01_baseline
+uv run python main.py experiment=exp01_baseline runtime.device=cuda
 ```
 
 Short smoke run:
 
 ```bash
-uv run python main.py experiment=exp01_baseline training.max_steps=1000
+uv run python main.py experiment=exp01_baseline runtime.device=cuda training.max_steps=1000
+```
+
+Evaluation after training:
+
+```bash
+uv run python scripts/evaluate.py evaluation.checkpoint=checkpoints/static_dense_nrx.pt \
+    evaluation.profiles=[uma,tdlc] runtime.device=cuda
 ```
 
 Or from this folder:
@@ -46,9 +55,11 @@ bash submit.sh local
 ## Current Status
 
 - implemented and training successfully
-- WandB naming and grouping are configured
-- current metrics: BER, SER, BLER, per-block bit-error summaries
-- validation is still pending
+- mixed-profile training preset is configured
+- WandB naming and grouping are configured for training and evaluation
+- current metrics: BER, SER, BLER, channel MSE, per-block bit-error summaries
+- cached validation during training is implemented
+- test evaluation targets `uma` and `tdlc` separately
 
 ## Results
 

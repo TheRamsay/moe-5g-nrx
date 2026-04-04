@@ -20,7 +20,7 @@ echo
 case "$MODE" in
   print)
     for exp in "${EXPERIMENTS[@]}"; do
-      echo "uv run python main.py experiment=$exp"
+      echo "uv run python main.py experiment=$exp runtime.device=cuda"
     done
     ;;
   local)
@@ -32,7 +32,7 @@ case "$MODE" in
   qsub)
     for exp in "${EXPERIMENTS[@]}"; do
       echo ">>> Submitting $exp"
-      qsub -v "RUN_ARGS=experiment=$exp" scripts/metacentrum_job.sh
+      qsub -v "RUN_ARGS=experiment=$exp runtime.device=cuda" scripts/metacentrum_job.sh
     done
     ;;
   *)

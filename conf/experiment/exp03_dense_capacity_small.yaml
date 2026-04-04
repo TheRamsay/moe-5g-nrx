@@ -3,12 +3,13 @@
 
 defaults:
   - override /model: static_dense
+  - override /dataset: mixed
 
 experiment:
   batch_name: dense-capacity-v1
   exp_name: dense_small_s56_b8_h32_bs32_lr1e3_s67
   tags: [baseline, dense, capacity, synthetic, simo-1x4, 16qam]
-  notes: "Small dense baseline for the capacity sweep (~168k parameters)."
+  notes: "Small dense baseline for the capacity sweep (~168k parameters), trained on mixed UMa/TDL-C batches."
 
 model:
   backbone:

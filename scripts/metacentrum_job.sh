@@ -125,7 +125,7 @@ if command -v nvidia-smi >/dev/null 2>&1; then
 fi
 
 ENTRYPOINT="${ENTRYPOINT:-main.py}"
-RUN_ARGS="${RUN_ARGS:-model=moe}"
+RUN_ARGS="${RUN_ARGS:-model=static_dense dataset=mixed runtime.device=cuda}"
 
 read -r -a run_args <<< "$RUN_ARGS"
 cmd=("$UV_BIN" run --offline --python 3.10 python "$ENTRYPOINT" "${run_args[@]}")

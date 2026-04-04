@@ -14,6 +14,8 @@ from hydra.utils import to_absolute_path
 from omegaconf import DictConfig
 from tqdm import tqdm
 
+import wandb
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
@@ -226,6 +228,113 @@ def print_results(results: dict[str, Any], dataset_name: str) -> None:
             )
 
 
+def _resolve_datasets(eval_cfg: DictConfig, checkpoint_cfg: dict[str, Any]) -> list[tuple[str, Path]]:
+    profile_list = eval_cfg.get("profiles")
+    if profile_list:
+        data_dir = Path(to_absolute_path(str(eval_cfg.get("data_dir", PROJECT_ROOT / "data" / "test"))))
+        return [(str(profile), data_dir / f"{profile}.pt") for profile in profile_list]
+
+    if bool(eval_cfg.get("all_profiles", False)):
+        profiles = ["uma", "tdlc", "mixed"]
+        data_dir = Path(to_absolute_path(str(eval_cfg.get("data_dir", PROJECT_ROOT / "data" / "test"))))
+        return [(profile, data_dir / f"{profile}.pt") for profile in profiles]
+
+    default_dataset = eval_cfg.get("dataset_path")
+    if default_dataset is None:
+        default_dataset = checkpoint_cfg.get("evaluation", {}).get("dataset_path", "data/test/mixed.pt")
+    default_path = Path(to_absolute_path(str(default_dataset)))
+    return [(default_path.stem, default_path)]
+
+
+def _init_wandb_eval_run(
+    cfg: DictConfig,
+    checkpoint_cfg: dict[str, Any],
+    checkpoint_path: Path,
+    dataset_names: list[str],
+) -> bool:
+    if not bool(cfg.logging.use_wandb) or not bool(cfg.evaluation.get("log_to_wandb", False)):
+        return False
+
+    checkpoint_logging = checkpoint_cfg.get("logging", {})
+    checkpoint_experiment = checkpoint_cfg.get("experiment", {})
+    checkpoint_model = checkpoint_cfg.get("model", {})
+
+    project_name = str(
+        cfg.logging.get("project")
+        or checkpoint_logging.get("project")
+        or checkpoint_cfg.get("project", {}).get("name", "moe-5g-nrx")
+    )
+    entity = cfg.logging.get("entity") or checkpoint_logging.get("entity")
+    batch_name = checkpoint_experiment.get("batch_name")
+    exp_name = checkpoint_experiment.get("exp_name") or checkpoint_path.stem
+    dataset_suffix = "-".join(dataset_names)
+    run_name = f"{exp_name}_eval_{dataset_suffix}"
+
+    tags = [str(checkpoint_model.get("family", "static_dense")), "eval"]
+    exp_tags = checkpoint_experiment.get("tags")
+    if exp_tags:
+        tags.extend([str(tag) for tag in exp_tags])
+    tags = list(dict.fromkeys(tags))
+
+    config_payload = {
+        "evaluation": {
+            "checkpoint": str(checkpoint_path),
+            "profiles": dataset_names,
+            "batch_size": int(cfg.evaluation.batch_size),
+            "max_samples": cfg.evaluation.max_samples,
+            "snr_bins": cfg.evaluation.snr_bins,
+            "device": str(cfg.evaluation.device),
+        },
+        "checkpoint": checkpoint_cfg,
+    }
+
+    wandb.init(
+        project=project_name,
+        entity=str(entity) if entity else None,
+        name=run_name,
+        group=batch_name,
+        tags=tags,
+        job_type="evaluation",
+        config=config_payload,
+    )
+    return True
+
+
+def _log_results_to_wandb(all_results: dict[str, dict[str, Any]]) -> None:
+    if wandb.run is None:
+        return
+
+    scalar_metrics: dict[str, Any] = {}
+    summary_table = wandb.Table(
+        columns=["profile", "loss_total", "loss_bce", "ber", "bler", "ser", "channel_mse", "num_samples"]
+    )
+
+    for profile, results in all_results.items():
+        scalar_metrics[f"eval/{profile}/loss_total"] = results["loss_total"]
+        scalar_metrics[f"eval/{profile}/loss_bce"] = results["loss_bce"]
+        scalar_metrics[f"eval/{profile}/ber"] = results["ber"]
+        scalar_metrics[f"eval/{profile}/bler"] = results["bler"]
+        scalar_metrics[f"eval/{profile}/ser"] = results["ser"]
+        scalar_metrics[f"eval/{profile}/channel_mse"] = results["channel_mse"]
+        scalar_metrics[f"eval/{profile}/num_samples"] = results["num_samples"]
+        summary_table.add_data(
+            profile,
+            results["loss_total"],
+            results["loss_bce"],
+            results["ber"],
+            results["bler"],
+            results["ser"],
+            results["channel_mse"],
+            results["num_samples"],
+        )
+
+    wandb.log(scalar_metrics)
+    wandb.log({"eval/summary": summary_table})
+
+    for key, value in scalar_metrics.items():
+        wandb.run.summary[key] = value
+
+
 @hydra.main(config_path="../conf", config_name="config", version_base=None)
 def main(cfg: DictConfig) -> None:
     eval_cfg = cfg.evaluation
@@ -256,16 +365,8 @@ def main(cfg: DictConfig) -> None:
     print(f"  Global step: {torch.load(checkpoint_path, weights_only=False)['global_step']}")
 
     # Determine datasets to evaluate
-    if bool(eval_cfg.get("all_profiles", False)):
-        profiles = ["uma", "tdlc", "mixed"]
-        data_dir = Path(to_absolute_path(str(eval_cfg.get("data_dir", PROJECT_ROOT / "data" / "test"))))
-        datasets = [(p, data_dir / f"{p}.pt") for p in profiles]
-    else:
-        default_dataset = eval_cfg.get("dataset_path")
-        if default_dataset is None:
-            default_dataset = config.get("evaluation", {}).get("dataset_path", "data/test/mixed.pt")
-        default_path = Path(to_absolute_path(str(default_dataset)))
-        datasets = [(default_path.stem, default_path)]
+    datasets = _resolve_datasets(eval_cfg, config)
+    _init_wandb_eval_run(cfg, config, checkpoint_path, [name for name, _ in datasets])
 
     # Evaluate each dataset
     all_results = {}
@@ -278,6 +379,7 @@ def main(cfg: DictConfig) -> None:
         dataloader = build_cached_dataloader(
             path=path,
             batch_size=int(eval_cfg.batch_size),
+            max_samples=int(eval_cfg.max_samples) if eval_cfg.max_samples is not None else None,
             shuffle=False,
         )
 
@@ -301,6 +403,10 @@ def main(cfg: DictConfig) -> None:
         print(f"  {'-' * 10}-+-{'-' * 10}-+-{'-' * 12}-+-{'-' * 10}")
         for name, results in all_results.items():
             print(f"  {name:>10} | {results['bler']:10.4f} | {results['ber']:12.6e} | {results['loss_total']:10.6f}")
+
+    _log_results_to_wandb(all_results)
+    if wandb.run is not None:
+        wandb.finish()
 
 
 if __name__ == "__main__":

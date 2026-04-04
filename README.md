@@ -9,15 +9,15 @@ MoE neural receiver for 5G with compute-aware routing.
 ./scripts/metacentrum_setup.sh
 
 # Run locally
-uv run python main.py model=moe training.max_steps=100
+uv run python main.py experiment=exp01_baseline training.max_steps=100
 
 # Submit batch job
-qsub -v "RUN_ARGS=model=moe" scripts/metacentrum_job.sh
+qsub -v "RUN_ARGS=experiment=exp01_baseline runtime.device=cuda" scripts/metacentrum_job.sh
 
 # Interactive job
 ./scripts/metacentrum_interactive.sh 2
 source scripts/interactive_env.sh
-run_experiment 'model=moe training.batch_size=64'
+run_experiment 'experiment=exp01_baseline runtime.device=cuda training.batch_size=64'
 ```
 
 ## Local Development
@@ -28,7 +28,7 @@ uv sync --python 3.10 --dev
 
 # Run
 uv run python main.py model=static_dense
-uv run python main.py model=moe training.batch_size=64 runtime.device=cuda
+uv run python main.py experiment=exp01_baseline dataset=mixed
 
 # Code quality
 uv run ruff check . --fix
@@ -45,10 +45,10 @@ uv run ruff format .
 ### Submit Jobs
 ```bash
 # Single job
-qsub -v "RUN_ARGS=model=moe" scripts/metacentrum_job.sh
+qsub -v "RUN_ARGS=experiment=exp01_baseline runtime.device=cuda" scripts/metacentrum_job.sh
 
 # With overrides
-qsub -v "RUN_ARGS=model=moe training.batch_size=128" \
+qsub -v "RUN_ARGS=experiment=exp01_baseline runtime.device=cuda training.batch_size=128" \
      -l walltime=8:00:00 \
      scripts/metacentrum_job.sh
 
@@ -66,7 +66,7 @@ qdel <JOBID>
 
 # On compute node
 source scripts/interactive_env.sh
-run_experiment 'model=moe'
+run_experiment 'experiment=exp01_baseline runtime.device=cuda'
 sync_back
 exit
 ```
@@ -89,10 +89,10 @@ Configs live in `conf/`:
 ```bash
 # Switch model
 uv run python main.py model=static_dense
-uv run python main.py model=moe
+uv run python main.py experiment=exp01_baseline
 
 # Override any value
-uv run python main.py model=moe training.batch_size=64
+uv run python main.py experiment=exp01_baseline training.batch_size=64
 ```
 
 Key files:
@@ -162,6 +162,8 @@ uv run python main.py dataset=uma    # UMa only
 uv run python main.py dataset=mixed
 ```
 
+For the current dense baselines, use `dataset=mixed` for training and evaluate the trained checkpoint on `uma` and `tdlc` separately.
+
 ### Validation During Training
 
 Validation runs periodically during training using cached val datasets:
@@ -179,15 +181,20 @@ uv run python main.py validation.enabled=false
 Test datasets are used **only after training completes**:
 
 ```bash
-# Evaluate on default test set
-uv run python scripts/evaluate.py --checkpoint checkpoints/static_dense.pt
+# Evaluate the canonical dense checkpoint on UMa + TDL-C
+uv run python scripts/evaluate.py evaluation.checkpoint=checkpoints/static_dense_nrx.pt \
+    evaluation.profiles=[uma,tdlc]
 
-# Evaluate on all channel profiles
-uv run python scripts/evaluate.py --checkpoint checkpoints/model.pt --all-profiles
+# Evaluate one explicit dataset
+uv run python scripts/evaluate.py evaluation.checkpoint=checkpoints/static_dense_nrx.pt \
+    evaluation.dataset_path=data/test/uma.pt evaluation.profiles=[]
 
 # SNR-binned analysis
-uv run python scripts/evaluate.py --checkpoint checkpoints/model.pt --snr-bins 5
+uv run python scripts/evaluate.py evaluation.checkpoint=checkpoints/static_dense_nrx.pt \
+    evaluation.profiles=[uma,tdlc] evaluation.snr_bins=5
 ```
+
+Evaluation logs a per-profile summary table and scalar metrics to WandB when `logging.use_wandb=true` and `evaluation.log_to_wandb=true`.
 
 ## Wandb
 

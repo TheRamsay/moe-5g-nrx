@@ -3,12 +3,13 @@
 
 defaults:
   - override /model: static_dense
+  - override /dataset: mixed
 
 experiment:
   batch_name: dense-baseline-v1
   exp_name: dense_s56_b8_h48_bs32_lr1e3_s67
   tags: [baseline, dense, synthetic, simo-1x4, 16qam]
-  notes: "Static dense single-user SIMO baseline on the synthetic PyTorch dataset."
+  notes: "Static dense single-user SIMO baseline trained on mixed UMa/TDL-C batches."
 
 training:
   max_steps: 10000

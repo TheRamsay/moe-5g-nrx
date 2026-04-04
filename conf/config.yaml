@@ -48,10 +48,12 @@ evaluation:
     dataset_path: data/test/mixed.pt
     batch_size: 64
     max_samples: null
-    all_profiles: true
+    all_profiles: false
+    profiles: [uma, tdlc]
     snr_bins: null
     device: ${runtime.device}
     data_dir: data/test
+    log_to_wandb: true
 
 experiment:
     batch_name: null

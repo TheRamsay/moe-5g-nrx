@@ -11,6 +11,8 @@ Before comparing against MoE, we need to know whether the dense baseline is unde
 
 This study keeps the architecture family fixed and changes only model capacity.
 
+All runs in this sweep should train on mixed UMa/TDL-C batches and be compared on cached `uma` and `tdlc` validation/test datasets separately.
+
 `exp01_baseline` remains the canonical standalone dense baseline preset. The `mid`
 run in this sweep lives in the `dense-capacity-v1` group so it can be compared
 directly against `small` and `large` within one study.
@@ -47,9 +49,9 @@ Choose the smallest dense model that is close to the best performer.
 From the repository root:
 
 ```bash
-uv run python main.py experiment=exp03_dense_capacity_small
-uv run python main.py experiment=exp04_dense_capacity_mid
-uv run python main.py experiment=exp05_dense_capacity_large
+uv run python main.py experiment=exp03_dense_capacity_small runtime.device=cuda
+uv run python main.py experiment=exp04_dense_capacity_mid runtime.device=cuda
+uv run python main.py experiment=exp05_dense_capacity_large runtime.device=cuda
 ```
 
 Or from this folder:
@@ -64,24 +66,33 @@ bash submit.sh local
 Run shorter smoke comparisons before the full `10k`-step sweep:
 
 ```bash
-uv run python main.py experiment=exp03_dense_capacity_small training.max_steps=1000
-uv run python main.py experiment=exp04_dense_capacity_mid training.max_steps=1000
-uv run python main.py experiment=exp05_dense_capacity_large training.max_steps=1000
+uv run python main.py experiment=exp03_dense_capacity_small runtime.device=cuda training.max_steps=1000
+uv run python main.py experiment=exp04_dense_capacity_mid runtime.device=cuda training.max_steps=1000
+uv run python main.py experiment=exp05_dense_capacity_large runtime.device=cuda training.max_steps=1000
 ```
 
 Then inspect the WandB group and compare:
 
-- `train/ber`
-- `train/ser`
-- `train/block_bit_errors_mean`
+- `val/ber` on `uma`
+- `val/ber` on `tdlc`
+- `val/bler`
 - `train/loss`
+
+Post-training evaluation:
+
+```bash
+uv run python scripts/evaluate.py evaluation.checkpoint=checkpoints/static_dense_nrx.pt \
+    evaluation.profiles=[uma,tdlc] runtime.device=cuda
+```
 
 ## Current Status
 
 - dense model family is implemented and trains successfully
 - WandB naming/grouping is now clean
-- training metrics include BER, SER, BLER, and per-block bit-error summaries
-- validation is not implemented yet, so current comparisons are still train-side only
+- runs now train on mixed UMa/TDL-C by default via experiment presets
+- training metrics include BER, SER, BLER, channel MSE, and per-block bit-error summaries
+- cached validation is implemented during training
+- evaluation can report and log separate `uma` and `tdlc` results
 
 ## Results
 
