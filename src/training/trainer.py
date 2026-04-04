@@ -96,6 +96,9 @@ class Trainer:
         val_every_n = int(self.cfg.validation.every_n_steps) if val_enabled else 0
         checkpoint_cfg = self.cfg.training.checkpoint
         checkpoint_every_n = int(checkpoint_cfg.every_n_steps)
+        overfit_enabled = bool(self.cfg.training.get("overfit_single_batch", False))
+        overfit_stop_loss = float(self.cfg.training.get("overfit_stop_loss", 0.01))
+        overfit_min_steps = int(self.cfg.training.get("overfit_min_steps", 100))
 
         while self.global_step < num_steps:
             try:
@@ -151,6 +154,13 @@ class Trainer:
                 latest_path = self._checkpoint_dir() / f"{self.cfg.model.name}_latest.pt"
                 self.save_checkpoint(str(latest_path), log_artifact=False, checkpoint_kind="latest")
                 print(f"  [CKPT] step={self.global_step} latest -> {latest_path}")
+
+            if overfit_enabled and self.global_step >= overfit_min_steps and metrics["loss"] <= overfit_stop_loss:
+                print(
+                    f"  [OVERFIT] step={self.global_step} reached target loss "
+                    f"{metrics['loss']:.6f} <= {overfit_stop_loss:.6f}"
+                )
+                break
 
         progress.close()
 

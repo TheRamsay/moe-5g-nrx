@@ -30,6 +30,8 @@ training:
     gradient_clip_norm: 1.0
     max_steps: 10000
     overfit_single_batch: false
+    overfit_stop_loss: 0.01
+    overfit_min_steps: 100
     checkpoint_dir: checkpoints
     checkpoint:
         every_n_steps: 500
