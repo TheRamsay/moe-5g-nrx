@@ -199,6 +199,8 @@ uv run python scripts/evaluate.py evaluation.checkpoint=checkpoints/static_dense
 
 Evaluation logs a per-profile summary table and scalar metrics to WandB when `logging.use_wandb=true` and `evaluation.log_to_wandb=true`.
 
+When possible, evaluation also links back to the checkpoint artifact produced by training and consumes `test/uma` / `test/tdlc` dataset artifacts, so the final eval run has explicit dataset and model lineage in WandB.
+
 ## Wandb
 
 ```bash
@@ -214,6 +216,37 @@ Env vars:
 export WANDB_PROJECT=my-project
 export WANDB_ENTITY=your-username
 ```
+
+Artifact workflow:
+
+```bash
+# Generate cached val/test datasets and log dataset artifacts
+uv run python scripts/generate_datasets.py generation.split=both
+
+# Train and log the final checkpoint as a model artifact
+uv run python main.py experiment=exp01_baseline
+
+# Evaluate a local checkpoint while automatically linking back to its artifact
+uv run python scripts/evaluate.py evaluation.checkpoint=checkpoints/static_dense_nrx.pt \
+    evaluation.profiles=[uma,tdlc]
+
+# Or evaluate directly from a checkpoint artifact reference
+uv run python scripts/evaluate.py \
+    evaluation.checkpoint_artifact=your-entity/moe-5g-nrx/model-<run-id>:latest \
+    evaluation.profiles=[uma,tdlc]
+```
+
+Report workflow:
+
+```bash
+uv run python scripts/create_wandb_report.py logging.entity=your-username
+```
+
+This creates a WandB report page with:
+- training curves (`train/*`, `val/uma/*`, `val/tdlc/*`)
+- final evaluation bar charts
+- parameter-count vs BLER scatter plots
+- a run comparer for dense baseline/capacity runs
 
 ## Results
 

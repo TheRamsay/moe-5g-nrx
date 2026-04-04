@@ -16,12 +16,16 @@ from hydra import compose
 from omegaconf import DictConfig, open_dict
 from tqdm import tqdm
 
+import wandb
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.utils.wandb_artifacts import log_dataset_artifact, setup_generation_wandb  # noqa: E402
 
 
 def build_config(profile: str, batch_size: int, seed: int) -> DictConfig:
@@ -225,6 +229,24 @@ def save_dataset(data: dict[str, Any], output_path: Path) -> None:
     print(f"  Saved: {output_path} ({size_mb:.1f} MB, {data['metadata']['num_samples']} samples)")
 
 
+def _log_dataset_to_wandb(
+    cfg: DictConfig, split_name: str, profile: str, output_path: Path, data: dict[str, Any]
+) -> None:
+    if wandb.run is None:
+        return
+
+    artifact_aliases = [str(alias) for alias in cfg.generation.get("artifact_aliases", ["latest"])]
+    artifact_ref = log_dataset_artifact(
+        output_path,
+        split=split_name,
+        profile=profile,
+        metadata=data["metadata"],
+        aliases=artifact_aliases,
+    )
+    if artifact_ref is not None:
+        print(f"  Logged WandB artifact: {artifact_ref}")
+
+
 def _resolve_split(split: str) -> list[tuple[str, int]]:
     from src.data.constants import TEST_SEED_OFFSET, VAL_SEED_OFFSET
 
@@ -241,6 +263,7 @@ def _resolve_split(split: str) -> list[tuple[str, int]]:
 @hydra.main(config_path="../conf", config_name="config", version_base=None)
 def main(cfg: DictConfig) -> None:
     generation_cfg = cfg.generation
+    use_wandb = setup_generation_wandb(cfg)
 
     output_dir = Path(str(generation_cfg.output_dir))
     if not output_dir.is_absolute():
@@ -294,7 +317,9 @@ def main(cfg: DictConfig) -> None:
                 seed=profile_seed,
                 desc=f"{split_name}/{profile}",
             )
-            save_dataset(data, split_dir / f"{profile}.pt")
+            output_path = split_dir / f"{profile}.pt"
+            save_dataset(data, output_path)
+            _log_dataset_to_wandb(cfg, split_name, profile, output_path, data)
             del data
             gc.collect()  # Free memory after each profile
 
@@ -310,7 +335,9 @@ def main(cfg: DictConfig) -> None:
                 seed=mixed_seed,
                 desc=f"{split_name}/mixed",
             )
-            save_dataset(data, split_dir / "mixed.pt")
+            output_path = split_dir / "mixed.pt"
+            save_dataset(data, output_path)
+            _log_dataset_to_wandb(cfg, split_name, "mixed", output_path, data)
             del data
             gc.collect()
 
@@ -325,6 +352,9 @@ def main(cfg: DictConfig) -> None:
         print(f"  validation.dataset_path: {output_dir}/val/{suggested_name}")
     if "test" in generated_splits:
         print(f"  evaluation.dataset_path: {output_dir}/test/{suggested_name}")
+
+    if use_wandb and wandb.run is not None:
+        wandb.finish()
 
 
 if __name__ == "__main__":

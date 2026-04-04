@@ -15,6 +15,7 @@ from src.data import CachedNRXBatch, build_cached_dataloader
 from src.models import StaticDenseNRX
 from src.utils.logging import finish_wandb, log_metrics, setup_wandb
 from src.utils.metrics import compute_batch_error_metrics
+from src.utils.wandb_artifacts import build_checkpoint_artifact_ref, log_checkpoint_artifact
 
 
 class Trainer:
@@ -24,8 +25,9 @@ class Trainer:
         self.cfg = cfg
         self.job_id = job_id
         self.device = self._resolve_device(str(cfg.runtime.device))
-        self.use_wandb = setup_wandb(cfg, job_id=job_id)
+        self.use_wandb = setup_wandb(cfg, job_id=job_id, job_type="train")
         self.model = self._build_model().to(self.device)
+        self.num_parameters = sum(parameter.numel() for parameter in self.model.parameters())
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(),
             lr=float(cfg.training.learning_rate),
@@ -36,6 +38,7 @@ class Trainer:
         self.global_step = 0
         self._val_dataloaders: dict[str, DataLoader] = {}
         self._setup_validation()
+        self._log_model_metadata()
 
     def train_step(self, batch: tuple[torch.Tensor, torch.Tensor, torch.Tensor]) -> dict[str, Any]:
         """Run a single optimization step."""
@@ -145,15 +148,45 @@ class Trainer:
         """Save model checkpoint and resolved config."""
         checkpoint_path = Path(path)
         checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+        wandb_info: dict[str, Any] | None = None
+        if wandb.run is not None:
+            wandb_info = {
+                "run_path": wandb.run.path,
+                "checkpoint_artifact": build_checkpoint_artifact_ref(
+                    wandb.run.project,
+                    wandb.run.entity,
+                    wandb.run.id,
+                    alias="latest",
+                ),
+            }
+
         torch.save(
             {
                 "model_state_dict": self.model.state_dict(),
                 "optimizer_state_dict": self.optimizer.state_dict(),
                 "global_step": self.global_step,
                 "config": OmegaConf.to_container(self.cfg, resolve=True),
+                "wandb": wandb_info,
             },
             checkpoint_path,
         )
+
+        artifact_ref = log_checkpoint_artifact(
+            checkpoint_path,
+            metadata={
+                "global_step": self.global_step,
+                "model_family": str(self.cfg.model.family),
+                "model_name": str(self.cfg.model.name),
+                "num_parameters": self.num_parameters,
+                "experiment_name": self.cfg.experiment.get("exp_name"),
+                "batch_name": self.cfg.experiment.get("batch_name"),
+            },
+            aliases=["latest", "final", f"step-{self.global_step}"],
+        )
+        if artifact_ref and wandb.run is not None:
+            wandb.run.summary["model/num_parameters"] = self.num_parameters
+            wandb.run.summary["model/global_step"] = self.global_step
+            wandb.run.summary["artifacts/checkpoint"] = artifact_ref
 
     def cleanup(self):
         """Cleanup and finish logging."""
@@ -181,6 +214,15 @@ class Trainer:
             pilot_symbol_indices=list(self.cfg.model.backbone.pilot_symbol_indices),
             pilot_subcarrier_spacing=int(self.cfg.model.backbone.pilot_subcarrier_spacing),
         )
+
+    def _log_model_metadata(self) -> None:
+        if wandb.run is None:
+            return
+
+        wandb.run.summary["model/num_parameters"] = self.num_parameters
+        wandb.run.summary["model/family"] = str(self.cfg.model.family)
+        wandb.run.summary["model/name"] = str(self.cfg.model.name)
+        wandb.run.summary["runtime/device"] = str(self.device)
 
     @staticmethod
     def _resolve_device(device_name: str) -> torch.device:

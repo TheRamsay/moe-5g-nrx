@@ -26,6 +26,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.data import CachedNRXBatch, build_cached_dataloader  # noqa: E402
 from src.models import StaticDenseNRX  # noqa: E402
 from src.utils.metrics import compute_batch_error_metrics  # noqa: E402
+from src.utils.wandb_artifacts import build_dataset_artifact_name, use_artifact_path  # noqa: E402
 
 
 def load_checkpoint(checkpoint_path: Path, device: torch.device) -> tuple[torch.nn.Module, dict[str, Any]]:
@@ -57,6 +58,15 @@ def load_checkpoint(checkpoint_path: Path, device: torch.device) -> tuple[torch.
     model.eval()
 
     return model, config
+
+
+def _download_checkpoint_artifact(artifact_ref: str) -> Path:
+    artifact = wandb.Api().artifact(artifact_ref)
+    download_dir = Path(artifact.download())
+    files = [path for path in download_dir.iterdir() if path.is_file()]
+    if len(files) == 1:
+        return files[0]
+    raise FileNotFoundError(f"Unable to resolve checkpoint file in {download_dir}")
 
 
 @torch.no_grad()
@@ -246,6 +256,28 @@ def _resolve_datasets(eval_cfg: DictConfig, checkpoint_cfg: dict[str, Any]) -> l
     return [(default_path.stem, default_path)]
 
 
+def _resolve_dataset_with_artifact(cfg: DictConfig, dataset_name: str, local_path: Path) -> Path:
+    if wandb.run is None or not bool(cfg.evaluation.get("use_artifacts", False)):
+        return local_path
+
+    artifact_name = build_dataset_artifact_name("test", dataset_name)
+    artifact_alias = str(cfg.evaluation.get("dataset_artifact_alias", "latest"))
+    project = str(cfg.logging.get("project") or cfg.project.name)
+    entity = cfg.logging.get("entity")
+    artifact_ref = f"{project}/{artifact_name}:{artifact_alias}"
+    if entity:
+        artifact_ref = f"{entity}/{artifact_ref}"
+
+    try:
+        artifact_path = use_artifact_path(artifact_ref, expected_filename=local_path.name)
+        wandb.run.summary[f"artifacts/dataset/{dataset_name}"] = artifact_ref
+        print(f"[INFO] Using dataset artifact for {dataset_name}: {artifact_ref}")
+        return artifact_path
+    except Exception as exc:
+        print(f"[WARNING] Unable to use dataset artifact {artifact_ref}: {exc}")
+        return local_path
+
+
 def _init_wandb_eval_run(
     cfg: DictConfig,
     checkpoint_cfg: dict[str, Any],
@@ -300,6 +332,26 @@ def _init_wandb_eval_run(
     return True
 
 
+def _link_checkpoint_artifact(checkpoint: dict[str, Any], explicit_artifact_ref: str | None) -> None:
+    if wandb.run is None:
+        return
+
+    artifact_ref = explicit_artifact_ref
+    if artifact_ref is None:
+        wandb_info = checkpoint.get("wandb") if isinstance(checkpoint, dict) else None
+        if isinstance(wandb_info, dict):
+            artifact_ref = wandb_info.get("checkpoint_artifact")
+
+    if not artifact_ref:
+        return
+
+    try:
+        wandb.run.use_artifact(str(artifact_ref))
+        wandb.run.summary["artifacts/source_checkpoint"] = str(artifact_ref)
+    except Exception as exc:
+        print(f"[WARNING] Unable to link checkpoint artifact {artifact_ref}: {exc}")
+
+
 def _log_results_to_wandb(all_results: dict[str, dict[str, Any]]) -> None:
     if wandb.run is None:
         return
@@ -338,12 +390,16 @@ def _log_results_to_wandb(all_results: dict[str, dict[str, Any]]) -> None:
 @hydra.main(config_path="../conf", config_name="config", version_base=None)
 def main(cfg: DictConfig) -> None:
     eval_cfg = cfg.evaluation
+    checkpoint_artifact = eval_cfg.get("checkpoint_artifact")
     checkpoint_raw = eval_cfg.get("checkpoint")
-    if checkpoint_raw is None:
+    if checkpoint_artifact is None and checkpoint_raw is None:
         print("[ERROR] Missing evaluation.checkpoint in Hydra config")
         sys.exit(1)
 
-    checkpoint_path = Path(to_absolute_path(str(checkpoint_raw)))
+    if checkpoint_artifact is not None:
+        checkpoint_path = _download_checkpoint_artifact(str(checkpoint_artifact))
+    else:
+        checkpoint_path = Path(to_absolute_path(str(checkpoint_raw)))
     requested_device = str(eval_cfg.get("device", cfg.runtime.device))
 
     # Resolve device
@@ -358,19 +414,28 @@ def main(cfg: DictConfig) -> None:
         print(f"[ERROR] Checkpoint not found: {checkpoint_path}")
         sys.exit(1)
 
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     model, config = load_checkpoint(checkpoint_path, device)
     bits_per_symbol = int(config["data"]["bits_per_symbol"])
     channel_loss_weight = float(config["model"]["compute"]["channel_loss_weight"])
+    num_parameters = sum(parameter.numel() for parameter in model.parameters())
     print(f"  Model: {config['model']['name']}")
-    print(f"  Global step: {torch.load(checkpoint_path, weights_only=False)['global_step']}")
+    print(f"  Global step: {checkpoint['global_step']}")
 
     # Determine datasets to evaluate
     datasets = _resolve_datasets(eval_cfg, config)
     _init_wandb_eval_run(cfg, config, checkpoint_path, [name for name, _ in datasets])
+    _link_checkpoint_artifact(checkpoint, str(checkpoint_artifact) if checkpoint_artifact is not None else None)
+    if wandb.run is not None:
+        wandb.run.summary["model/num_parameters"] = num_parameters
+        wandb.run.summary["model/global_step"] = checkpoint["global_step"]
+        wandb.run.summary["model/name"] = str(config["model"]["name"])
+        wandb.run.summary["model/family"] = str(config["model"]["family"])
 
     # Evaluate each dataset
     all_results = {}
-    for name, path in datasets:
+    for name, local_path in datasets:
+        path = _resolve_dataset_with_artifact(cfg, name, local_path)
         if not path.exists():
             print(f"\n[WARNING] Dataset not found: {path}, skipping")
             continue

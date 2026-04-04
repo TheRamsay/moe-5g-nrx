@@ -29,7 +29,7 @@ def _cfg_get(cfg: DictConfig, path: str, default: Any = None) -> Any:
     return current
 
 
-def setup_wandb(cfg: DictConfig, job_id: str | None = None) -> bool:
+def setup_wandb(cfg: DictConfig, job_id: str | None = None, *, job_type: str = "train") -> bool:
     """Initialize wandb for experiment tracking.
 
     Args:
@@ -99,6 +99,7 @@ def setup_wandb(cfg: DictConfig, job_id: str | None = None) -> bool:
             entity=str(entity) if entity else None,
             name=run_name,
             group=batch_name,
+            job_type=job_type,
             tags=tags,
             notes=notes,
             config=config_dict,

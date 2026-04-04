@@ -42,6 +42,7 @@ validation:
 
 evaluation:
     checkpoint: checkpoints/static_dense_nrx.pt
+    checkpoint_artifact: null
     dataset_path: data/test/mixed.pt
     batch_size: 64
     max_samples: null
@@ -51,6 +52,8 @@ evaluation:
     device: ${runtime.device}
     data_dir: data/test
     log_to_wandb: true
+    use_artifacts: true
+    dataset_artifact_alias: latest
 
 experiment:
     batch_name: null
@@ -66,6 +69,18 @@ generation:
     profiles: [uma, tdlc]
     include_mixed: true
     base_seed: 67
+    log_to_wandb: true
+    artifact_aliases: [latest]
+
+reporting:
+    create_wandb_report: true
+    title: Dense Baseline Study
+    description: Dense baseline and capacity comparison across validation and evaluation runs.
+    slug: dense-baseline-study
+    train_groups: [dense-baseline-v1, dense-capacity-v1]
+    eval_groups: [dense-baseline-v1, dense-capacity-v1]
+    eval_job_type: evaluation
+    train_job_type: train
 
 logging:
     use_wandb: true
