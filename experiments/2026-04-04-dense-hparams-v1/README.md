@@ -64,6 +64,7 @@ bash experiments/2026-04-04-dense-hparams-v1/submit.sh print
 Submit the full sweep:
 
 ```bash
+source experiments/resources/gpu-16gb.sh
 BASE_EXPERIMENT=exp05_dense_capacity_large \
 DATA_ROOT=$HOME/moe-5g-datasets/dense-v1 \
 bash experiments/2026-04-04-dense-hparams-v1/submit.sh qsub
@@ -77,6 +78,19 @@ LEARNING_RATES='5e-4 1e-3 2e-3' \
 WEIGHT_DECAYS='0 1e-5 1e-4' \
 MAX_STEPS=12000 \
 VALIDATION_EVERY_N_STEPS=250 \
+bash experiments/2026-04-04-dense-hparams-v1/submit.sh qsub
+```
+
+Promote the stage-1 winner to a longer 10k-step run on the 16 GB class:
+
+```bash
+source experiments/resources/gpu-16gb.sh
+BASE_EXPERIMENT=exp05_dense_capacity_large \
+BASE_LABEL=dense_large_stage2_best \
+LEARNING_RATES='1e-3' \
+WEIGHT_DECAYS='0' \
+MAX_STEPS=10000 \
+EXTRA_ARGS='experiment.batch_name=dense-hparams-stage2-v1' \
 bash experiments/2026-04-04-dense-hparams-v1/submit.sh qsub
 ```
 
@@ -98,12 +112,12 @@ bash experiments/2026-04-04-dense-hparams-v1/submit.sh qsub
 
 | Base experiment | Run | Best metric seen | Notes |
 |---|---|---|---|
-| `exp05_dense_capacity_large` | `lr3e-4_wd0` | - | pending |
-| `exp05_dense_capacity_large` | `lr3e-4_wd1e-4` | - | pending |
-| `exp05_dense_capacity_large` | `lr1e-3_wd0` | - | pending |
-| `exp05_dense_capacity_large` | `lr1e-3_wd1e-4` | - | pending |
-| `exp05_dense_capacity_large` | `lr3e-3_wd0` | - | pending |
-| `exp05_dense_capacity_large` | `lr3e-3_wd1e-4` | - | pending |
+| `exp05_dense_capacity_large` | `lr3e-4_wd0` | `0.21160` mean val BER | run `koajben3`, job `18699375.pbs-m1.metacentrum.cz` |
+| `exp05_dense_capacity_large` | `lr3e-4_wd1e-4` | `0.21148` mean val BER | run `esn3an82`, job `18699376.pbs-m1.metacentrum.cz` |
+| `exp05_dense_capacity_large` | `lr1e-3_wd0` | `0.20716` mean val BER | run `z83gb9cn`, job `18699377.pbs-m1.metacentrum.cz`, winner promoted to 10k-step follow-up |
+| `exp05_dense_capacity_large` | `lr1e-3_wd1e-4` | `0.20733` mean val BER | run `a7vq3qx5`, job `18699378.pbs-m1.metacentrum.cz` |
+| `exp05_dense_capacity_large` | `lr3e-3_wd0` | `0.30130` mean val BER | run `xhyr2ml1`, job `18699379.pbs-m1.metacentrum.cz` |
+| `exp05_dense_capacity_large` | `lr3e-3_wd1e-4` | `0.30043` mean val BER | run `s922x90u`, job `18699380.pbs-m1.metacentrum.cz` |
 
 ## Reporting
 
