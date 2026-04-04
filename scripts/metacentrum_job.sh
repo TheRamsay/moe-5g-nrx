@@ -7,6 +7,8 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
+DEFAULT_GPU_MODULES="${DEFAULT_GPU_MODULES:-cuda/11.6.2-gcc-10.2.1-nwpmxyy cudnn/8.4.0.27-11.6-gcc-10.2.1-pqxrvlk}"
+
 log() {
     printf '[metacentrum-job][%s] %s\n' "${PBS_JOBID:-local}" "$*"
 }
@@ -29,6 +31,12 @@ init_modules() {
     if command -v module >/dev/null 2>&1; then
         module purge >/dev/null 2>&1 || true
         module add metabase/1 >/dev/null 2>&1 || true
+
+        if [[ -n "$DEFAULT_GPU_MODULES" ]]; then
+            # shellcheck disable=SC2206
+            local default_gpu_modules=( ${DEFAULT_GPU_MODULES} )
+            module add "${default_gpu_modules[@]}"
+        fi
 
         if [[ -n "${EXTRA_MODULES:-}" ]]; then
             # shellcheck disable=SC2206

@@ -2,8 +2,8 @@ defaults:
     - model: static_dense
     - wandb: default
     - _self_
-    - optional experiment: null
     - dataset: tdlc
+    - optional experiment: null
     - override hydra/job_logging: disabled
     - override hydra/hydra_logging: disabled
 
