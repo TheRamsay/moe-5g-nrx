@@ -350,6 +350,8 @@ def _init_wandb_eval_run(
     run_name = f"{exp_name}_eval_{dataset_suffix}"
 
     tags = [str(checkpoint_model.get("family", "static_dense")), "eval"]
+    if batch_name:
+        tags.append(str(batch_name).replace("-", "_"))
     exp_tags = checkpoint_experiment.get("tags")
     if exp_tags:
         tags.extend([str(tag) for tag in exp_tags])

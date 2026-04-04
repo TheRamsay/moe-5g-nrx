@@ -56,6 +56,7 @@ def setup_generation_wandb(cfg: DictConfig) -> bool:
     entity = _cfg_get(cfg, "logging.entity")
     split = str(_cfg_get(cfg, "generation.split", "both"))
     profiles = list(_cfg_get(cfg, "generation.profiles", []))
+    study_slug = _cfg_get(cfg, "experiment.study_slug")
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     run_name = f"datasets_{split}_{'-'.join(str(profile) for profile in profiles)}_{stamp}"
 
@@ -73,7 +74,7 @@ def setup_generation_wandb(cfg: DictConfig) -> bool:
         entity=str(entity) if entity else None,
         name=run_name,
         group="dataset-generation",
-        tags=["data", "generation"],
+        tags=[tag for tag in ["data", "generation", str(study_slug) if study_slug else None] if tag],
         job_type="data_generation",
         config=config_payload,
     )
