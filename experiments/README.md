@@ -46,7 +46,10 @@ experiments/
 ├── 2026-03-29-dense-baseline-v1/
 │   ├── README.md
 │   └── submit.sh
-└── 2026-03-29-dense-capacity-v1/
+├── 2026-03-29-dense-capacity-v1/
+│   ├── README.md
+│   └── submit.sh
+└── 2026-04-04-dense-hparams-v1/
     ├── README.md
     └── submit.sh
 
@@ -99,3 +102,4 @@ This makes the study folder the human-facing launch manifest while keeping the a
 
 - `2026-03-29-dense-baseline-v1/` - canonical single-run dense baseline reference
 - `2026-03-29-dense-capacity-v1/` - dense baseline capacity sweep
+- `2026-04-04-dense-hparams-v1/` - optimizer sweep for the selected dense capacity
