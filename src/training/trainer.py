@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +38,7 @@ class Trainer:
         self.channel_loss_fn = torch.nn.MSELoss()
         self.global_step = 0
         self._val_dataloaders: dict[str, DataLoader] = {}
+        self._best_checkpoint_score: float | None = None
         self._setup_validation()
         self._log_model_metadata()
 
@@ -92,6 +94,8 @@ class Trainer:
 
         val_enabled = bool(self._val_dataloaders)
         val_every_n = int(self.cfg.validation.every_n_steps) if val_enabled else 0
+        checkpoint_cfg = self.cfg.training.checkpoint
+        checkpoint_every_n = int(checkpoint_cfg.every_n_steps)
 
         while self.global_step < num_steps:
             try:
@@ -136,6 +140,18 @@ class Trainer:
                 )
                 print(f"  [VAL] step={self.global_step} {summary}")
 
+                if bool(checkpoint_cfg.save_best):
+                    self._maybe_save_best_checkpoint(val_metrics)
+
+            if (
+                bool(checkpoint_cfg.save_latest)
+                and checkpoint_every_n > 0
+                and self.global_step % checkpoint_every_n == 0
+            ):
+                latest_path = self._checkpoint_dir() / f"{self.cfg.model.name}_latest.pt"
+                self.save_checkpoint(str(latest_path), log_artifact=False, checkpoint_kind="latest")
+                print(f"  [CKPT] step={self.global_step} latest -> {latest_path}")
+
         progress.close()
 
     @staticmethod
@@ -144,7 +160,15 @@ class Trainer:
 
         return {f"train/{key}": value for key, value in metrics.items()}
 
-    def save_checkpoint(self, path: str) -> None:
+    def save_checkpoint(
+        self,
+        path: str,
+        *,
+        artifact_aliases: list[str] | None = None,
+        artifact_primary_alias: str | None = None,
+        log_artifact: bool = True,
+        checkpoint_kind: str = "final",
+    ) -> str | None:
         """Save model checkpoint and resolved config."""
         checkpoint_path = Path(path)
         checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
@@ -152,13 +176,14 @@ class Trainer:
         if wandb.run is not None:
             wandb_info = {
                 "run_path": wandb.run.path,
-                "checkpoint_artifact": build_checkpoint_artifact_ref(
+            }
+            if log_artifact and artifact_primary_alias:
+                wandb_info["checkpoint_artifact"] = build_checkpoint_artifact_ref(
                     wandb.run.project,
                     wandb.run.entity,
                     wandb.run.id,
-                    alias="latest",
-                ),
-            }
+                    alias=artifact_primary_alias,
+                )
 
         torch.save(
             {
@@ -166,27 +191,38 @@ class Trainer:
                 "optimizer_state_dict": self.optimizer.state_dict(),
                 "global_step": self.global_step,
                 "config": OmegaConf.to_container(self.cfg, resolve=True),
+                "checkpoint_kind": checkpoint_kind,
                 "wandb": wandb_info,
             },
             checkpoint_path,
         )
 
-        artifact_ref = log_checkpoint_artifact(
-            checkpoint_path,
-            metadata={
-                "global_step": self.global_step,
-                "model_family": str(self.cfg.model.family),
-                "model_name": str(self.cfg.model.name),
-                "num_parameters": self.num_parameters,
-                "experiment_name": self.cfg.experiment.get("exp_name"),
-                "batch_name": self.cfg.experiment.get("batch_name"),
-            },
-            aliases=["latest", "final", f"step-{self.global_step}"],
-        )
+        artifact_ref: str | None = None
+        if log_artifact:
+            alias_list = artifact_aliases or ["latest", checkpoint_kind, f"step-{self.global_step}"]
+            artifact_ref = log_checkpoint_artifact(
+                checkpoint_path,
+                metadata={
+                    "global_step": self.global_step,
+                    "model_family": str(self.cfg.model.family),
+                    "model_name": str(self.cfg.model.name),
+                    "num_parameters": self.num_parameters,
+                    "experiment_name": self.cfg.experiment.get("exp_name"),
+                    "batch_name": self.cfg.experiment.get("batch_name"),
+                    "checkpoint_kind": checkpoint_kind,
+                },
+                aliases=alias_list,
+            )
+
+            if artifact_ref and wandb.run is not None:
+                wandb.run.summary[f"artifacts/checkpoint_{checkpoint_kind}"] = artifact_ref
+                if checkpoint_kind == "final":
+                    wandb.run.summary["artifacts/checkpoint"] = artifact_ref
+
         if artifact_ref and wandb.run is not None:
             wandb.run.summary["model/num_parameters"] = self.num_parameters
             wandb.run.summary["model/global_step"] = self.global_step
-            wandb.run.summary["artifacts/checkpoint"] = artifact_ref
+        return artifact_ref
 
     def cleanup(self):
         """Cleanup and finish logging."""
@@ -223,6 +259,71 @@ class Trainer:
         wandb.run.summary["model/family"] = str(self.cfg.model.family)
         wandb.run.summary["model/name"] = str(self.cfg.model.name)
         wandb.run.summary["runtime/device"] = str(self.device)
+
+    def _checkpoint_dir(self) -> Path:
+        return Path(str(self.cfg.training.checkpoint_dir))
+
+    def _compute_checkpoint_score(self, val_metrics: dict[str, dict[str, Any]]) -> float | None:
+        checkpoint_cfg = self.cfg.training.checkpoint
+        metric_name = str(checkpoint_cfg.best_metric)
+        aggregation = str(checkpoint_cfg.best_metric_aggregation)
+        configured_profiles = checkpoint_cfg.get("best_profiles")
+        profile_names = (
+            [str(profile) for profile in configured_profiles] if configured_profiles else list(val_metrics.keys())
+        )
+
+        values: list[float] = []
+        for profile in profile_names:
+            metrics = val_metrics.get(profile)
+            if metrics is None or metric_name not in metrics:
+                continue
+            values.append(float(metrics[metric_name]))
+
+        if not values:
+            return None
+
+        if aggregation == "mean":
+            return sum(values) / len(values)
+        if aggregation == "max":
+            return max(values)
+        if aggregation == "min":
+            return min(values)
+        raise ValueError(f"Unsupported checkpoint aggregation: {aggregation}")
+
+    def _is_better_checkpoint(self, score: float) -> bool:
+        if self._best_checkpoint_score is None:
+            return True
+
+        mode = str(self.cfg.training.checkpoint.best_metric_mode)
+        if mode == "min":
+            return score < self._best_checkpoint_score - 1e-12
+        if mode == "max":
+            return score > self._best_checkpoint_score + 1e-12
+        raise ValueError(f"Unsupported checkpoint mode: {mode}")
+
+    def _maybe_save_best_checkpoint(self, val_metrics: dict[str, dict[str, Any]]) -> None:
+        score = self._compute_checkpoint_score(val_metrics)
+        if score is None or not math.isfinite(score):
+            return
+
+        if not self._is_better_checkpoint(score):
+            return
+
+        self._best_checkpoint_score = score
+        best_path = self._checkpoint_dir() / f"{self.cfg.model.name}_best.pt"
+        self.save_checkpoint(
+            str(best_path),
+            artifact_aliases=["best", f"step-{self.global_step}"],
+            artifact_primary_alias="best",
+            log_artifact=True,
+            checkpoint_kind="best",
+        )
+
+        if wandb.run is not None:
+            wandb.run.summary["checkpoint/best_score"] = score
+            wandb.run.summary["checkpoint/best_step"] = self.global_step
+
+        print(f"  [CKPT] step={self.global_step} new best -> {best_path} (score={score:.6f})")
 
     @staticmethod
     def _resolve_device(device_name: str) -> torch.device:

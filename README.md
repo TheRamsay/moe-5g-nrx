@@ -179,6 +179,24 @@ uv run python main.py validation.profiles=[] validation.dataset_path=data/val/um
 uv run python main.py validation.enabled=false
 ```
 
+Checkpointing during training:
+
+```bash
+# Save latest checkpoints every 500 steps and track the best validation checkpoint
+uv run python main.py training.checkpoint.every_n_steps=500
+
+# Change checkpoint selection metric
+uv run python main.py training.checkpoint.best_metric=ber
+
+# Select best checkpoint by the worst profile instead of the mean
+uv run python main.py training.checkpoint.best_metric_aggregation=max
+```
+
+By default training now writes:
+- `<checkpoint_dir>/<model>.pt` for the final checkpoint
+- `<checkpoint_dir>/<model>_latest.pt` for the latest periodic checkpoint
+- `<checkpoint_dir>/<model>_best.pt` for the best validation checkpoint
+
 ### Test Evaluation (Post-Training Only)
 
 Test datasets are used **only after training completes**:
@@ -233,6 +251,11 @@ uv run python scripts/evaluate.py evaluation.checkpoint=checkpoints/static_dense
 # Or evaluate directly from a checkpoint artifact reference
 uv run python scripts/evaluate.py \
     evaluation.checkpoint_artifact=your-entity/moe-5g-nrx/model-<run-id>:latest \
+    evaluation.profiles=[uma,tdlc]
+
+# Use the best validation checkpoint artifact instead of the final one
+uv run python scripts/evaluate.py \
+    evaluation.checkpoint_artifact=your-entity/moe-5g-nrx/model-<run-id>:best \
     evaluation.profiles=[uma,tdlc]
 ```
 

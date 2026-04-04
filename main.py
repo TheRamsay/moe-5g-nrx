@@ -56,7 +56,13 @@ def main(cfg: DictConfig) -> None:
     try:
         trainer.train(train_loader=train_loader, num_steps=int(cfg.training.max_steps))
         checkpoint_path = Path(cfg.training.checkpoint_dir) / f"{cfg.model.name}.pt"
-        trainer.save_checkpoint(str(checkpoint_path))
+        trainer.save_checkpoint(
+            str(checkpoint_path),
+            artifact_aliases=["latest", "final", f"step-{trainer.global_step}"],
+            artifact_primary_alias="latest",
+            log_artifact=True,
+            checkpoint_kind="final",
+        )
         print(f"Saved checkpoint to {checkpoint_path}")
     finally:
         trainer.cleanup()
