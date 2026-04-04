@@ -4,6 +4,18 @@
 **Question:** What dense baseline capacity is strong enough without being unnecessarily large?  
 **WandB group:** `dense-capacity-v1`
 
+**Dataset root:** set via `DATA_ROOT`, expected layout:
+
+```text
+$DATA_ROOT/
+├── val/
+│   ├── uma.pt
+│   └── tdlc.pt
+└── test/
+    ├── uma.pt
+    └── tdlc.pt
+```
+
 ## Motivation
 
 We now have a fixed single-user SIMO dense receiver family in `src/models/dense.py`.
@@ -21,8 +33,9 @@ directly against `small` and `large` within one study.
 
 Choose the smallest dense model that is close to the best performer.
 
-- early-stage comparison: `train/ber`, `train/ser`, `train/block_bit_errors_mean`
-- later, after validation is added: `val/ber` becomes the main selection metric
+- primary selection metric: mean validation `ber` across `uma` and `tdlc`
+- tie-breaker: prefer the smaller model if metrics are close
+- final testing should evaluate the `:best` checkpoint artifact, not the final checkpoint
 - if two models are very close, prefer the smaller one
 
 ## Runs in This Study
@@ -41,7 +54,8 @@ Choose the smallest dense model that is close to the best performer.
 - batch size: `32`
 - learning rate: `1e-3`
 - seed: `67`
-- dataset: current synthetic PyTorch generator
+- training dataset: online Sionna mixed generator (`uma` + `tdlc`)
+- validation dataset: cached Sionna-generated `uma` + `tdlc`
 - training budget: currently `10k` steps unless overridden
 
 ## Quick Start
@@ -49,9 +63,18 @@ Choose the smallest dense model that is close to the best performer.
 From the repository root:
 
 ```bash
-uv run python main.py experiment=exp03_dense_capacity_small runtime.device=cuda
-uv run python main.py experiment=exp04_dense_capacity_mid runtime.device=cuda
-uv run python main.py experiment=exp05_dense_capacity_large runtime.device=cuda
+DATA_ROOT=$HOME/moe-5g-datasets/dense-v1 \
+uv run python main.py experiment=exp03_dense_capacity_small runtime.device=cuda \
+    validation.data_dir=$DATA_ROOT/val \
+    training.checkpoint_dir=../artifacts/checkpoints
+DATA_ROOT=$HOME/moe-5g-datasets/dense-v1 \
+uv run python main.py experiment=exp04_dense_capacity_mid runtime.device=cuda \
+    validation.data_dir=$DATA_ROOT/val \
+    training.checkpoint_dir=../artifacts/checkpoints
+DATA_ROOT=$HOME/moe-5g-datasets/dense-v1 \
+uv run python main.py experiment=exp05_dense_capacity_large runtime.device=cuda \
+    validation.data_dir=$DATA_ROOT/val \
+    training.checkpoint_dir=../artifacts/checkpoints
 ```
 
 Or from this folder:
@@ -59,6 +82,7 @@ Or from this folder:
 ```bash
 bash submit.sh print
 bash submit.sh local
+bash submit.sh qsub
 ```
 
 ## Suggested First Pass
@@ -66,23 +90,38 @@ bash submit.sh local
 Run shorter smoke comparisons before the full `10k`-step sweep:
 
 ```bash
-uv run python main.py experiment=exp03_dense_capacity_small runtime.device=cuda training.max_steps=1000
-uv run python main.py experiment=exp04_dense_capacity_mid runtime.device=cuda training.max_steps=1000
-uv run python main.py experiment=exp05_dense_capacity_large runtime.device=cuda training.max_steps=1000
+DATA_ROOT=$HOME/moe-5g-datasets/dense-v1 \
+uv run python main.py experiment=exp03_dense_capacity_small runtime.device=cuda training.max_steps=1000 \
+    validation.data_dir=$DATA_ROOT/val training.checkpoint_dir=../artifacts/checkpoints
+DATA_ROOT=$HOME/moe-5g-datasets/dense-v1 \
+uv run python main.py experiment=exp04_dense_capacity_mid runtime.device=cuda training.max_steps=1000 \
+    validation.data_dir=$DATA_ROOT/val training.checkpoint_dir=../artifacts/checkpoints
+DATA_ROOT=$HOME/moe-5g-datasets/dense-v1 \
+uv run python main.py experiment=exp05_dense_capacity_large runtime.device=cuda training.max_steps=1000 \
+    validation.data_dir=$DATA_ROOT/val training.checkpoint_dir=../artifacts/checkpoints
 ```
 
 Then inspect the WandB group and compare:
 
-- `val/ber` on `uma`
-- `val/ber` on `tdlc`
-- `val/bler`
+- `val/uma/ber`
+- `val/tdlc/ber`
+- `checkpoint/best_score`
 - `train/loss`
 
-Post-training evaluation:
+Post-training evaluation from the best local checkpoint:
 
 ```bash
-uv run python scripts/evaluate.py evaluation.checkpoint=checkpoints/static_dense_nrx.pt \
-    evaluation.profiles=[uma,tdlc] runtime.device=cuda
+DATA_ROOT=$HOME/moe-5g-datasets/dense-v1 \
+uv run python scripts/evaluate.py runtime.device=cuda \
+    evaluation.checkpoint=results/<JOBID>/checkpoints/static_dense_nrx_best.pt \
+    evaluation.data_dir=$DATA_ROOT/test
+```
+
+Or evaluate directly from the best checkpoint artifact:
+
+```bash
+uv run python scripts/evaluate.py runtime.device=cuda \
+    evaluation.checkpoint_artifact=knn_moe-5g-nrx/moe-5g-nrx/model-<run-id>:best
 ```
 
 ## Current Status
@@ -93,20 +132,26 @@ uv run python scripts/evaluate.py evaluation.checkpoint=checkpoints/static_dense
 - training metrics include BER, SER, BLER, channel MSE, and per-block bit-error summaries
 - cached validation is implemented during training
 - evaluation can report and log separate `uma` and `tdlc` results
+- best/latest/final checkpointing is enabled
 
 ## Results
 
 | Config | Status | Best metric seen | Notes |
 |---|---|---|---|
-| `exp03_dense_capacity_small` | pending | - | |
-| `exp04_dense_capacity_mid` | pending | - | |
-| `exp05_dense_capacity_large` | pending | - | |
+| `exp03_dense_capacity_small` | active | - | record `run-id`, `job id`, and `:best` checkpoint artifact |
+| `exp04_dense_capacity_mid` | active | - | record `run-id`, `job id`, and `:best` checkpoint artifact |
+| `exp05_dense_capacity_large` | active | - | record `run-id`, `job id`, and `:best` checkpoint artifact |
+
+## Reporting
+
+- WandB report URL: add after the first full sweep
+- Preferred test input: `model-<run-id>:best` evaluated on cached `$DATA_ROOT/test/{uma,tdlc}.pt`
 
 ## Next Step After This Study
 
 After selecting the best size region:
 
-1. add validation
-2. sweep learning rate on the chosen capacity
-3. rerun the best dense setup across multiple seeds
-4. freeze the final dense baseline before MoE comparison
+1. sweep learning rate on the chosen capacity
+2. rerun the best dense setup across multiple seeds
+3. freeze the final dense baseline before MoE comparison
+4. add OOD evaluation later as a separate study
