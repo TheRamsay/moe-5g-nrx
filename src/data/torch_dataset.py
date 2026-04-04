@@ -216,6 +216,18 @@ class MixedNRXIterableDataset(IterableDataset[NRXBatch]):
         )
 
 
+class FixedBatchIterableDataset(IterableDataset[NRXBatch]):
+    """Repeats a single captured batch indefinitely for overfit sanity checks."""
+
+    def __init__(self, batch: NRXBatch) -> None:
+        super().__init__()
+        self.batch = batch
+
+    def __iter__(self) -> Iterator[NRXBatch]:
+        while True:
+            yield self.batch
+
+
 def _single_batch_collate(batch: NRXBatch | list[NRXBatch]) -> NRXBatch:
     """Handle both direct and list-style invocations from DataLoader."""
 
@@ -259,6 +271,10 @@ def build_dataloader(cfg: DictConfig) -> DataLoader:
             max_batches=max_batches,
             base_seed=int(cfg.runtime.seed),
         )
+
+    if bool(cfg.training.get("overfit_single_batch", False)):
+        fixed_batch = next(iter(dataset))
+        dataset = FixedBatchIterableDataset(fixed_batch)
 
     loader_cfg = cfg.dataset.loader
     num_workers = int(loader_cfg.num_workers)
