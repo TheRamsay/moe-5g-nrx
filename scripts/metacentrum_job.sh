@@ -21,6 +21,15 @@ add_modules() {
     fi
 }
 
+split_cli_args() {
+    local args_string="$1"
+    local -n out_array_ref="$2"
+    local old_ifs="$IFS"
+    IFS=' '
+    read -r -a out_array_ref <<< "$args_string"
+    IFS="$old_ifs"
+}
+
 log() {
     printf '[metacentrum-job][%s] %s\n' "${PBS_JOBID:-local}" "$*"
 }
@@ -144,7 +153,7 @@ fi
 ENTRYPOINT="${ENTRYPOINT:-main.py}"
 RUN_ARGS="${RUN_ARGS:-model=static_dense dataset=mixed runtime.device=cuda}"
 
-read -r -a run_args <<< "$RUN_ARGS"
+split_cli_args "$RUN_ARGS" run_args
 cmd=("$UV_BIN" run --offline --python 3.10 python "$ENTRYPOINT" "${run_args[@]}")
 
 printf '%q ' "${cmd[@]}" > "$ARTIFACT_DIR/command.sh"

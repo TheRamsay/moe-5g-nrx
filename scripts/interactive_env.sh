@@ -35,6 +35,15 @@ add_modules() {
     fi
 }
 
+split_cli_args() {
+    local args_string="$1"
+    local -n out_array_ref="$2"
+    local old_ifs="$IFS"
+    IFS=' '
+    read -r -a out_array_ref <<< "$args_string"
+    IFS="$old_ifs"
+}
+
 # =============================================================================
 # Configuration
 # =============================================================================
@@ -119,7 +128,7 @@ run_experiment() {
     local args="${1:-model=static_dense dataset=mixed runtime.device=cuda}"
     local run_args=()
     log "Running: python main.py $args"
-    read -r -a run_args <<< "$args"
+    split_cli_args "$args" run_args
     (
         cd "$WORK_ROOT"
         UV_PROJECT_ENVIRONMENT="$WORK_ROOT/.venv" \
