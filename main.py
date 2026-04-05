@@ -41,7 +41,7 @@ class _TrainingBatchAdapter:
 
     def __iter__(self):
         for batch in self._dataloader:
-            yield batch.inputs, batch.bit_labels.flatten(start_dim=1), batch.channel_target
+            yield batch.inputs, batch.bit_labels.flatten(start_dim=1), batch.channel_target, batch.channel_profile
 
 
 @hydra.main(config_path="conf", config_name="config", version_base=None)

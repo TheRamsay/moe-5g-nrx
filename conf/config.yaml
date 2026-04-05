@@ -103,6 +103,8 @@ reporting:
 logging:
     use_wandb: true
     log_every_n_steps: 50
+    train_metrics_ema_alpha: 0.1
+    train_metrics_window_size: 50
 
 hydra:
     output_subdir: null

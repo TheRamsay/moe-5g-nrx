@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any
 
@@ -40,13 +41,36 @@ class Trainer:
         self.global_step = 0
         self._val_dataloaders: dict[str, DataLoader] = {}
         self._best_checkpoint_score: float | None = None
+        self._train_metric_keys = [
+            "loss",
+            "ber",
+            "bler",
+            "ser",
+            "channel_mse",
+            "grad_norm",
+            "block_bit_errors_mean",
+            "block_bit_errors_median",
+            "block_bit_errors_p90",
+            "block_bit_errors_max",
+        ]
+        self._profile_metric_keys = ["loss", "ber", "bler", "ser", "channel_mse"]
+        self._train_metrics_ema_alpha = float(cfg.logging.get("train_metrics_ema_alpha", 0.1))
+        self._train_metrics_window_size = max(int(cfg.logging.get("train_metrics_window_size", 50)), 1)
+        self._train_metric_ema: dict[str, float] = {}
+        self._train_metric_windows: dict[str, deque[float]] = {
+            key: deque(maxlen=self._train_metrics_window_size) for key in self._train_metric_keys
+        }
+        self._profile_metric_ema: dict[str, dict[str, float]] = defaultdict(dict)
+        self._profile_metric_windows: dict[str, dict[str, deque[float]]] = defaultdict(
+            lambda: {key: deque(maxlen=self._train_metrics_window_size) for key in self._profile_metric_keys}
+        )
         self._setup_validation()
         self._log_model_metadata()
 
-    def train_step(self, batch: tuple[torch.Tensor, torch.Tensor, torch.Tensor]) -> dict[str, Any]:
+    def train_step(self, batch: tuple[torch.Tensor, torch.Tensor, torch.Tensor, str]) -> dict[str, Any]:
         """Run a single optimization step."""
         self.model.train()
-        features, targets, channel_targets = batch
+        features, targets, channel_targets, channel_profile = batch
         features = features.to(self.device)
         targets = targets.to(self.device)
         channel_targets = channel_targets.to(self.device)
@@ -88,6 +112,7 @@ class Trainer:
             "channel_mse": float(channel_mse.detach().cpu().item()),
             "grad_norm": grad_norm,
             "block_bit_errors_hist": wandb.Histogram(bit_errors_per_block.detach().cpu().numpy()),
+            "channel_profile": str(channel_profile),
         }
 
     def train(self, train_loader, num_steps: int) -> None:
@@ -113,6 +138,7 @@ class Trainer:
 
             metrics = self.train_step(batch)
             self.global_step += 1
+            train_metrics = self._build_smoothed_train_metrics(metrics)
 
             progress.update(1)
             progress.set_postfix(
@@ -123,15 +149,19 @@ class Trainer:
             )
 
             metrics["lr"] = float(self.optimizer.param_groups[0]["lr"])
+            train_metrics["lr"] = metrics["lr"]
             if self.use_wandb:
-                log_metrics(self._format_logging_metrics(metrics), step=self.global_step)
+                log_metrics(self._format_logging_metrics(metrics, train_metrics), step=self.global_step)
             else:
                 metrics.pop("block_bit_errors_hist", None)
 
             if self.global_step == 1 or self.global_step % int(self.cfg.logging.log_every_n_steps) == 0:
+                profile = str(metrics["channel_profile"])
                 print(
                     f"step={self.global_step} loss={metrics['loss']:.4f} "
+                    f"ema_loss={train_metrics['ema/loss']:.4f} "
                     f"ber={metrics['ber']:.4f} ser={metrics['ser']:.4f} bler={metrics['bler']:.4f} "
+                    f"profile={profile} "
                     f"block_bits(mean/p90/max)="
                     f"{metrics['block_bit_errors_mean']:.1f}/{metrics['block_bit_errors_p90']:.1f}/{metrics['block_bit_errors_max']:.1f}"
                 )
@@ -169,10 +199,42 @@ class Trainer:
         progress.close()
 
     @staticmethod
-    def _format_logging_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
+    def _mean(values: deque[float]) -> float:
+        return sum(values) / max(len(values), 1)
+
+    def _build_smoothed_train_metrics(self, metrics: dict[str, Any]) -> dict[str, Any]:
+        smoothed: dict[str, Any] = {}
+
+        for key in self._train_metric_keys:
+            value = float(metrics[key])
+            previous = self._train_metric_ema.get(key, value)
+            ema_value = previous + self._train_metrics_ema_alpha * (value - previous)
+            self._train_metric_ema[key] = ema_value
+            self._train_metric_windows[key].append(value)
+            smoothed[f"ema/{key}"] = ema_value
+            smoothed[f"window/{key}"] = self._mean(self._train_metric_windows[key])
+
+        profile = str(metrics["channel_profile"])
+        for key in self._profile_metric_keys:
+            value = float(metrics[key])
+            previous = self._profile_metric_ema[profile].get(key, value)
+            ema_value = previous + self._train_metrics_ema_alpha * (value - previous)
+            self._profile_metric_ema[profile][key] = ema_value
+            self._profile_metric_windows[profile][key].append(value)
+            smoothed[f"profile/{profile}/{key}"] = value
+            smoothed[f"profile/{profile}/ema/{key}"] = ema_value
+            smoothed[f"profile/{profile}/window/{key}"] = self._mean(self._profile_metric_windows[profile][key])
+
+        return smoothed
+
+    @staticmethod
+    def _format_logging_metrics(metrics: dict[str, Any], smoothed_metrics: dict[str, Any]) -> dict[str, Any]:
         """Namespace training metrics for cleaner WandB plots."""
 
-        return {f"train/{key}": value for key, value in metrics.items()}
+        logged_metrics = {f"train/{key}": value for key, value in metrics.items() if key != "channel_profile"}
+        logged_metrics.update({f"train/{key}": value for key, value in smoothed_metrics.items()})
+        logged_metrics["train/channel_profile"] = str(metrics["channel_profile"])
+        return logged_metrics
 
     def save_checkpoint(
         self,
