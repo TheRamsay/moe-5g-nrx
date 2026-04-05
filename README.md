@@ -203,21 +203,34 @@ For dense baselines, the default best-checkpoint selection metric is the mean va
 
 Test datasets are used **only after training completes**:
 
+Current canonical dense checkpoint artifact:
+
+- `knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best`
+
 ```bash
 # Evaluate the canonical dense checkpoint on UMa + TDL-C
-uv run python scripts/evaluate.py evaluation.checkpoint=checkpoints/static_dense_nrx.pt \
+uv run python scripts/evaluate.py \
+    evaluation.checkpoint_artifact=knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best \
     evaluation.profiles=[uma,tdlc]
 
 # Evaluate one explicit dataset
-uv run python scripts/evaluate.py evaluation.checkpoint=checkpoints/static_dense_nrx.pt \
+uv run python scripts/evaluate.py \
+    evaluation.checkpoint_artifact=knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best \
     evaluation.dataset_path=data/test/uma.pt evaluation.profiles=[]
 
 # SNR-binned analysis
-uv run python scripts/evaluate.py evaluation.checkpoint=checkpoints/static_dense_nrx.pt \
+uv run python scripts/evaluate.py \
+    evaluation.checkpoint_artifact=knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best \
     evaluation.profiles=[uma,tdlc] evaluation.snr_bins=5
 ```
 
 Evaluation logs a per-profile summary table and scalar metrics to WandB when `logging.use_wandb=true` and `evaluation.log_to_wandb=true`.
+
+When `evaluation.snr_bins` is enabled, eval runs also log:
+
+- `viz/snr_binned_error_heatmap`
+- `viz/failure_grid_heatmap`
+- `eval/failure_grid`
 
 When possible, evaluation also links back to the checkpoint artifact produced by training and consumes `test/uma` / `test/tdlc` dataset artifacts, so the final eval run has explicit dataset and model lineage in WandB.
 

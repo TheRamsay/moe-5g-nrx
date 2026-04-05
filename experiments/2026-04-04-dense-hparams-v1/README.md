@@ -124,8 +124,22 @@ bash experiments/2026-04-04-dense-hparams-v1/submit.sh qsub
 - WandB report URL: add after the sweep finishes
 - Preferred test input: the winning run's `model-<exp-name>-<run-id>:best`
 
+## Outcome
+
+This study narrowed the optimizer region successfully, but it did not produce the final frozen dense baseline on its own.
+
+- best stage-2 `10k` BER winner: `lr=1e-3`, `wd=1e-4`
+- best stage-2 `10k` BLER variant: `lr=1e-3`, `wd=0`
+- both were superseded by the `20k` dense-finalization follow-up study
+
+Frozen dense baseline artifact:
+
+- `knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best`
+
+See `experiments/2026-04-05-dense-finalization-v1/README.md` for the final train/test selection and canonical dense reference.
+
 ## Next Step After This Study
 
-1. rerun the best dense setup across multiple seeds
-2. evaluate the best checkpoint on cached `uma` and `tdlc` test sets
-3. freeze the final dense baseline before MoE comparison
+1. treat this study as the optimizer narrowing stage
+2. use the `2026-04-05-dense-finalization-v1` result as the frozen dense baseline
+3. compare MoE primarily against that frozen 20k constant-LR checkpoint

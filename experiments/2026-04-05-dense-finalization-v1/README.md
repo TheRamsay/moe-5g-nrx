@@ -46,9 +46,28 @@ bash experiments/2026-04-05-dense-finalization-v1/submit.sh qsub
 
 | Run | Best validation metric seen | Notes |
 |---|---|---|
-| `20k_constant_lr` | pending | pending |
-| `20k_cosine_decay` | pending | pending |
+| `20k_constant_lr` | `0.196518` mean val BER at step `19500` | train run `55l1dpby`, eval run `tdw0ip58`, best checkpoint `knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best` |
+| `20k_cosine_decay` | `0.196999` mean val BER at step `20000` | train run `yc1kr036`, eval run `v3xjtdep`, best checkpoint `knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_cosine_lr_s67-yc1kr036:best` |
+
+## Frozen Dense Baseline
+
+The canonical dense baseline is now frozen as:
+
+- recipe: `exp05_dense_capacity_large`
+- optimizer: `lr=1e-3`, `wd=1e-4`
+- schedule: none
+- max steps: `20000`
+- seed: `67`
+- checkpoint selection metric: mean validation `ber` across `uma` and `tdlc`
+- checkpoint artifact: `knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best`
+
+Cached test metrics for the frozen checkpoint (`tdw0ip58`):
+
+- `uma`: BER `0.268348`, BLER `0.936096`
+- `tdlc`: BER `0.122086`, BLER `0.866028`
+
+The cosine run remained competitive, but it lost on the primary dense-baseline selection metric and also trailed the constant-LR run on BER for both profiles on cached test.
 
 ## Next Step
 
-Freeze the winning dense checkpoint and then start the minimal joint MoE study.
+Use the frozen checkpoint above as the dense reference for MoE work, then start the minimal joint MoE study.
