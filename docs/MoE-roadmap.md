@@ -236,76 +236,98 @@ Before MoE training, freeze the dense reference recipe:
 
 That gives you a clean target to beat.
 
-## Phase 1: Minimal Joint MoE
+## Phase 1: Minimal Joint MoE (Baseline)
 
-This should be the **first MoE implementation**, not staged training.
+Joint training from scratch serves as the **experimental baseline**, not because it is the best approach, but because it is the simplest to implement and establishes the floor that Phase 2 must beat.
 
-Why:
+### Why joint first
 
-- simpler to debug,
-- fewer moving parts,
-- proves the architecture works,
-- faster route to first meaningful results.
+- Proves the architecture works end-to-end before adding initialization complexity.
+- Finds working `alpha` / `beta` hyperparameters that carry into Phase 2.
+- Produces the "joint from scratch" data point for the ablation comparison.
 
-Training behavior:
+### Known limitation
 
-- run all experts during training,
-- use router probabilities to form a weighted output,
-- compute expected FLOPs from router probabilities,
-- add compute penalty.
+Without warm-started experts, the router receives gradient signal from randomly initialized experts. Symmetry breaking is noisy, and router collapse is a real risk (confirmed in v0: collapsed to large expert without load-balance penalty). `beta >= 0.1` is required to keep all experts alive.
 
-This is the easiest way to keep training differentiable.
-
-### Recommended Loss
-
-First working version:
+### Loss
 
 ```text
 L = BCE(logits, targets)
   + lambda_channel * MSE(channel_estimate, channel_target)
-  + alpha * expected_flops
-```
-
-Then likely add a routing regularizer:
-
-```text
-L = BCE + lambda_channel * MSE + alpha * expected_flops + beta * load_balance
+  + alpha * expected_flops_ratio
+  + beta * load_balance
 ```
 
 Where:
 
-- `expected_flops` = stem FLOPs + router_probs dot expert_FLOPs
-- `load_balance` discourages collapse to only one expert too early
+- `expected_flops_ratio` = (stem FLOPs + router_probs · expert_FLOPs) / max_FLOPs
+- `load_balance` = MSE between mean batch router probs and uniform (1/N per expert)
+- `beta = 0.1` is the minimum viable load-balance penalty (confirmed empirically)
+- `alpha` controls the BLER vs FLOPs tradeoff — sweep to find the Pareto frontier
 
-### Recommended Training Details
+### Training details
 
-- optimizer: start from the final dense recipe
-- router temperature: start around `1.0`
-- anneal gradually toward `0.3-0.5`
-- do not hard-route in training at first
+- optimizer: `lr=1e-3`, `wd=1e-4` (matches dense recipe)
+- training gate: Gumbel-Softmax, temperature `1.0` → `0.5`
+- inference gate: hard top-1
 
-## Phase 2: Warm-Started Experts / Two-Stage Variant
+### Experiment status
 
-This is the variant most likely to improve quality and impress the teacher.
+- v0 (`alpha=0, beta=0`): router collapsed to large expert → confirmed beta is necessary
+- 2k sweeps (`alpha ∈ {0, 1e-5, 1e-4}` × `beta ∈ {0.01, 0.1}`): `beta=0.1` prevents collapse, per-profile routing differentiation already visible (TDLC → large, UMA → small)
+- v1 alpha sweep (`alpha ∈ {1e-3, 5e-3, 1e-2}`, `beta=0.1`, 10k steps): in progress
+
+## Phase 2: Warm-Started Staged Training
+
+This is the variant most likely to improve quality and is the **scientifically stronger contribution**.
+
+### Why warm-starting is more logical than joint from scratch
+
+The dense capacity sweep already produced trained small, mid, and large checkpoints. Pretraining experts is essentially free — it is already done. Loading those weights into the MoE expert branches means:
+
+- Experts start competent and differentiated from each other.
+- The router receives useful gradient signal from day one.
+- No symmetry breaking problem — small expert already knows how to handle easy samples, large already handles hard ones.
+- Training is more stable without requiring strong load-balance penalties.
+
+Joint from scratch forces the router and experts to co-discover roles simultaneously, which is harder and less controlled. Staged training gives each phase a single job.
 
 ### Stage 2A: Expert Warm Start
 
-- load tiny/medium/heavy expert weights from dense checkpoints
-- initialize shared stem from the strongest dense stem
+- Load `small` expert weights from the dense small checkpoint.
+- Load `mid` expert weights from the dense mid checkpoint.
+- Load `large` expert weights from the dense large checkpoint.
+- Initialize shared stem from the large dense checkpoint stem.
 
-### Stage 2B: Router-First Adaptation
+### Stage 2B: Router-First Warmup (experts frozen)
 
-Try either:
+- Freeze all expert parameters.
+- Train router + shared stem only for ~1-2k steps.
+- Experts are fixed, so the router learns to identify which expert to use without the experts shifting under it.
 
-1. freeze experts briefly, train router + shared stem,
-2. then unfreeze and jointly fine-tune,
+### Stage 2C: Joint Fine-Tune (all unfrozen)
 
-or:
+- Unfreeze everything.
+- Fine-tune jointly with the same `alpha` / `beta` found in Phase 1.
+- Experts can now specialize further given their established roles.
 
-1. freeze experts only for a short warmup,
-2. then train everything jointly.
+### What this ablation tells you
 
-This directly matches your notes and proposal.
+Comparing Phase 1 vs Phase 2 directly answers:
+
+> Does warm-starting experts with dense checkpoints produce better routing, faster convergence, or a better BLER-FLOPs tradeoff than joint training from scratch?
+
+If Phase 2 Pareto-dominates Phase 1 on the BLER vs FLOPs curve, warm-starting is clearly worth it. If they are similar, joint training is sufficient.
+
+### Role emergence vs role assignment
+
+An important distinction for the writeup:
+
+- **Phase 1 (joint):** Expert roles *emerge* through co-training. The router and experts discover specialization together. This must be verified post-hoc — does the emerged routing correlate with channel difficulty?
+- **Phase 2 (staged):** Expert roles are *inherited* from dense training. The router learns to identify which channel regime maps to each already-specialized expert. Interpretability is more controlled but less of a discovery.
+
+Both are valid. The comparison between them is the scientific contribution.
 
 ## Phase 3: Hard Inference
 
@@ -571,18 +593,21 @@ Mitigation:
 
 ## Recommended Execution Order
 
-1. Freeze final dense baseline recipe
-2. Implement minimal joint MoE
-3. Run `alpha` sweep for BLER vs FLOPs
-4. Add expert usage logging and plots
-5. Add warm-started / staged training variant
-6. Compare joint vs staged
-7. Run final tuned MoE vs tuned dense test evaluation
-8. Later: OOD DeepMIMO
+1. ~~Freeze final dense baseline recipe~~ ✓ done
+2. ~~Implement minimal joint MoE~~ ✓ done
+3. ~~Find working beta (load-balance penalty)~~ ✓ `beta=0.1` confirmed
+4. Run `alpha` sweep for BLER vs FLOPs tradeoff → **in progress** (v1: alpha ∈ {1e-3, 5e-3, 1e-2})
+5. Pick best alpha, run one clean 10k Phase 1 final with SNR-binned evaluation
+6. Implement expert warm-start initialization (load dense checkpoints into MoE expert branches)
+7. Run Phase 2: router warmup (frozen experts) → joint fine-tune
+8. Compare Phase 1 vs Phase 2 on BLER vs FLOPs curve
+9. Run final test evaluation (test set, locked, once per model variant)
+10. Expert usage vs SNR analysis and interpretability plots
+11. Later: OOD DeepMIMO (optional but strengthens the claim)
 
 ## Final Recommendation
 
-Do **not** start with the most complex staged MoE.
+Do **not** start with the most complex staged MoE — use joint from scratch first to find hyperparameters and establish a baseline. But recognize that Phase 2 (warm-started staged) is the scientifically stronger variant and the one most likely to produce the best Pareto point.
 
 Start with:
 
