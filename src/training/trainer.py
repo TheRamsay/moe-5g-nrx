@@ -34,6 +34,7 @@ class Trainer:
             lr=float(cfg.training.learning_rate),
             weight_decay=float(cfg.training.weight_decay),
         )
+        self.scheduler: torch.optim.lr_scheduler.LRScheduler | None = None
         self.loss_fn = torch.nn.BCEWithLogitsLoss()
         self.channel_loss_fn = torch.nn.MSELoss()
         self.global_step = 0
@@ -60,6 +61,8 @@ class Trainer:
         clip_value = float(self.cfg.training.gradient_clip_norm)
         grad_norm = float(torch.nn.utils.clip_grad_norm_(self.model.parameters(), clip_value))
         self.optimizer.step()
+        if self.scheduler is not None:
+            self.scheduler.step()
 
         error_metrics = compute_batch_error_metrics(
             logits,
@@ -91,6 +94,7 @@ class Trainer:
         """Main training loop with periodic metric logging and validation."""
         data_iterator = iter(train_loader)
         progress = tqdm(total=num_steps, desc="train", dynamic_ncols=True)
+        self.scheduler = self._build_scheduler(num_steps)
 
         val_enabled = bool(self._val_dataloaders)
         val_every_n = int(self.cfg.validation.every_n_steps) if val_enabled else 0
@@ -201,6 +205,7 @@ class Trainer:
             {
                 "model_state_dict": self.model.state_dict(),
                 "optimizer_state_dict": self.optimizer.state_dict(),
+                "scheduler_state_dict": self.scheduler.state_dict() if self.scheduler is not None else None,
                 "global_step": self.global_step,
                 "config": OmegaConf.to_container(self.cfg, resolve=True),
                 "checkpoint_kind": checkpoint_kind,
@@ -238,6 +243,24 @@ class Trainer:
             wandb.run.summary["model/num_parameters"] = self.num_parameters
             wandb.run.summary["model/global_step"] = self.global_step
         return artifact_ref
+
+    def _build_scheduler(self, num_steps: int) -> torch.optim.lr_scheduler.LRScheduler | None:
+        scheduler_cfg = self.cfg.training.get("scheduler")
+        if scheduler_cfg is None:
+            return None
+
+        scheduler_name = str(scheduler_cfg.get("name", "none")).lower()
+        if scheduler_name in {"", "none", "off", "disabled", "null"}:
+            return None
+
+        if scheduler_name == "cosine":
+            return torch.optim.lr_scheduler.CosineAnnealingLR(
+                self.optimizer,
+                T_max=max(int(num_steps), 1),
+                eta_min=float(scheduler_cfg.get("min_lr", 0.0)),
+            )
+
+        raise ValueError(f"Unsupported training.scheduler.name: {scheduler_name}")
 
     def cleanup(self):
         """Cleanup and finish logging."""
