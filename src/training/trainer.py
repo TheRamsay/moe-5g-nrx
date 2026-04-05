@@ -1,4 +1,4 @@
-"""Training loop for dense neural receiver baselines."""
+"""Training loop for neural receiver models."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 import wandb
 from src.data import CachedNRXBatch, build_cached_dataloader
-from src.models import StaticDenseNRX
+from src.models import build_model_from_config
 from src.utils.logging import finish_wandb, log_metrics, setup_wandb
 from src.utils.metrics import compute_batch_error_metrics
 from src.utils.wandb_artifacts import build_checkpoint_artifact_ref, log_checkpoint_artifact
@@ -41,28 +41,15 @@ class Trainer:
         self.global_step = 0
         self._val_dataloaders: dict[str, DataLoader] = {}
         self._best_checkpoint_score: float | None = None
-        self._train_metric_keys = [
-            "loss",
-            "ber",
-            "bler",
-            "ser",
-            "channel_mse",
-            "grad_norm",
-            "block_bit_errors_mean",
-            "block_bit_errors_median",
-            "block_bit_errors_p90",
-            "block_bit_errors_max",
-        ]
-        self._profile_metric_keys = ["loss", "ber", "bler", "ser", "channel_mse"]
         self._train_metrics_ema_alpha = float(cfg.logging.get("train_metrics_ema_alpha", 0.1))
         self._train_metrics_window_size = max(int(cfg.logging.get("train_metrics_window_size", 50)), 1)
         self._train_metric_ema: dict[str, float] = {}
-        self._train_metric_windows: dict[str, deque[float]] = {
-            key: deque(maxlen=self._train_metrics_window_size) for key in self._train_metric_keys
-        }
+        self._train_metric_windows: dict[str, deque[float]] = defaultdict(
+            lambda: deque(maxlen=self._train_metrics_window_size)
+        )
         self._profile_metric_ema: dict[str, dict[str, float]] = defaultdict(dict)
         self._profile_metric_windows: dict[str, dict[str, deque[float]]] = defaultdict(
-            lambda: {key: deque(maxlen=self._train_metrics_window_size) for key in self._profile_metric_keys}
+            lambda: defaultdict(lambda: deque(maxlen=self._train_metrics_window_size))
         )
         self._setup_validation()
         self._log_model_metadata()
@@ -113,6 +100,7 @@ class Trainer:
             "grad_norm": grad_norm,
             "block_bit_errors_hist": wandb.Histogram(bit_errors_per_block.detach().cpu().numpy()),
             "channel_profile": str(channel_profile),
+            **self._collect_aux_metrics(outputs),
         }
 
     def train(self, train_loader, num_steps: int) -> None:
@@ -157,11 +145,18 @@ class Trainer:
 
             if self.global_step == 1 or self.global_step % int(self.cfg.logging.log_every_n_steps) == 0:
                 profile = str(metrics["channel_profile"])
+                compute_summary = ""
+                if "expected_flops_ratio" in metrics:
+                    compute_summary = (
+                        f" exp_flops={metrics['expected_flops_ratio']:.3f}"
+                        f" real_flops={metrics['realized_flops_ratio']:.3f}"
+                    )
                 print(
                     f"step={self.global_step} loss={metrics['loss']:.4f} "
                     f"ema_loss={train_metrics['ema/loss']:.4f} "
                     f"ber={metrics['ber']:.4f} ser={metrics['ser']:.4f} bler={metrics['bler']:.4f} "
                     f"profile={profile} "
+                    f"{compute_summary}"
                     f"block_bits(mean/p90/max)="
                     f"{metrics['block_bit_errors_mean']:.1f}/{metrics['block_bit_errors_p90']:.1f}/{metrics['block_bit_errors_max']:.1f}"
                 )
@@ -204,8 +199,11 @@ class Trainer:
 
     def _build_smoothed_train_metrics(self, metrics: dict[str, Any]) -> dict[str, Any]:
         smoothed: dict[str, Any] = {}
+        numeric_metric_keys = [
+            key for key, value in metrics.items() if isinstance(value, int | float) and key not in {"channel_profile"}
+        ]
 
-        for key in self._train_metric_keys:
+        for key in numeric_metric_keys:
             value = float(metrics[key])
             previous = self._train_metric_ema.get(key, value)
             ema_value = previous + self._train_metrics_ema_alpha * (value - previous)
@@ -215,7 +213,7 @@ class Trainer:
             smoothed[f"window/{key}"] = self._mean(self._train_metric_windows[key])
 
         profile = str(metrics["channel_profile"])
-        for key in self._profile_metric_keys:
+        for key in numeric_metric_keys:
             value = float(metrics[key])
             previous = self._profile_metric_ema[profile].get(key, value)
             ema_value = previous + self._train_metrics_ema_alpha * (value - previous)
@@ -329,27 +327,7 @@ class Trainer:
         finish_wandb()
 
     def _build_model(self) -> torch.nn.Module:
-        if str(self.cfg.model.family) != "static_dense":
-            raise NotImplementedError(f"Model family '{self.cfg.model.family}' is not implemented yet")
-
-        return StaticDenseNRX(
-            input_channels=int(self.cfg.data.input_channels),
-            output_bits=int(self.cfg.data.bits_per_symbol)
-            * int(self.cfg.data.num_subcarriers)
-            * int(self.cfg.data.num_ofdm_symbols),
-            state_dim=int(self.cfg.model.backbone.state_dim),
-            num_cnn_blocks=int(self.cfg.model.backbone.num_cnn_blocks),
-            stem_hidden_dims=list(self.cfg.model.backbone.stem_hidden_dims),
-            block_hidden_dim=int(self.cfg.model.backbone.block_hidden_dim),
-            readout_hidden_dim=int(self.cfg.model.backbone.readout_hidden_dim),
-            activation=str(self.cfg.model.backbone.activation),
-            num_subcarriers=int(self.cfg.data.num_subcarriers),
-            num_ofdm_symbols=int(self.cfg.data.num_ofdm_symbols),
-            bits_per_symbol=int(self.cfg.data.bits_per_symbol),
-            num_rx_antennas=int(self.cfg.data.num_rx_antennas),
-            pilot_symbol_indices=list(self.cfg.model.backbone.pilot_symbol_indices),
-            pilot_subcarrier_spacing=int(self.cfg.model.backbone.pilot_subcarrier_spacing),
-        )
+        return build_model_from_config(self.cfg)
 
     def _log_model_metadata(self) -> None:
         if wandb.run is None:
@@ -359,6 +337,8 @@ class Trainer:
         wandb.run.summary["model/family"] = str(self.cfg.model.family)
         wandb.run.summary["model/name"] = str(self.cfg.model.name)
         wandb.run.summary["runtime/device"] = str(self.device)
+        if hasattr(self.model, "expert_names"):
+            wandb.run.summary["model/expert_names"] = list(getattr(self.model, "expert_names"))
 
     def _checkpoint_dir(self) -> Path:
         return Path(str(self.cfg.training.checkpoint_dir))
@@ -442,6 +422,17 @@ class Trainer:
         final_loss = self.loss_fn(outputs["logits"], targets) + channel_weight * self.channel_loss_fn(
             outputs["channel_estimate"], channel_targets
         )
+        compute_cfg = self.cfg.model.compute
+        flops_penalty_alpha = float(compute_cfg.get("flops_penalty_alpha", 0.0))
+        if flops_penalty_alpha > 0.0 and "expected_flops_ratio" in outputs:
+            final_loss = final_loss + flops_penalty_alpha * outputs["expected_flops_ratio"]
+
+        load_balance_beta = float(compute_cfg.get("load_balance_beta", 0.0))
+        if load_balance_beta > 0.0 and "router_probs" in outputs:
+            mean_probs = outputs["router_probs"].mean(dim=0)
+            uniform_probs = torch.full_like(mean_probs, 1.0 / max(mean_probs.numel(), 1))
+            load_balance_penalty = torch.mean((mean_probs - uniform_probs) ** 2)
+            final_loss = final_loss + load_balance_beta * load_balance_penalty
 
         intermediate_logits = outputs["intermediate_logits"]
         intermediate_channel_estimates = outputs["intermediate_channel_estimates"]
@@ -453,6 +444,28 @@ class Trainer:
             multi_loss = multi_loss + self.loss_fn(logits, targets)
             multi_loss = multi_loss + channel_weight * self.channel_loss_fn(channel_estimate, channel_targets)
         return final_loss + multi_loss
+
+    def _collect_aux_metrics(self, outputs: dict[str, torch.Tensor | list[torch.Tensor]]) -> dict[str, float]:
+        aux_metrics: dict[str, float] = {}
+        router_probs = outputs.get("router_probs")
+        if isinstance(router_probs, torch.Tensor):
+            entropy = -(router_probs * router_probs.clamp_min(1e-8).log()).sum(dim=-1).mean()
+            aux_metrics["router_entropy"] = float(entropy.detach().cpu().item())
+            mean_probs = router_probs.mean(dim=0)
+            expert_names = getattr(self.model, "expert_names", [str(index) for index in range(mean_probs.numel())])
+            for expert_index, expert_name in enumerate(expert_names):
+                aux_metrics[f"expert_usage/{expert_name}"] = float(mean_probs[expert_index].detach().cpu().item())
+
+        for metric_name in [
+            "expected_flops",
+            "expected_flops_ratio",
+            "realized_flops",
+            "realized_flops_ratio",
+        ]:
+            metric_value = outputs.get(metric_name)
+            if isinstance(metric_value, torch.Tensor):
+                aux_metrics[metric_name] = float(metric_value.detach().cpu().item())
+        return aux_metrics
 
     def _setup_validation(self) -> None:
         """Initialize validation dataloader if enabled."""

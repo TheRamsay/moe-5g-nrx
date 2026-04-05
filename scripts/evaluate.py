@@ -25,7 +25,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.data import CachedNRXBatch, build_cached_dataloader  # noqa: E402
-from src.models import StaticDenseNRX  # noqa: E402
+from src.models import build_model_from_config  # noqa: E402
 from src.utils.metrics import compute_batch_error_metrics  # noqa: E402
 from src.utils.wandb_artifacts import build_dataset_artifact_name, use_artifact_path  # noqa: E402
 
@@ -35,25 +35,7 @@ def load_checkpoint(checkpoint_path: Path, device: torch.device) -> tuple[torch.
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     config = checkpoint["config"]
 
-    # Build model from saved config
-    model = StaticDenseNRX(
-        input_channels=int(config["data"]["input_channels"]),
-        output_bits=int(config["data"]["bits_per_symbol"])
-        * int(config["data"]["num_subcarriers"])
-        * int(config["data"]["num_ofdm_symbols"]),
-        state_dim=int(config["model"]["backbone"]["state_dim"]),
-        num_cnn_blocks=int(config["model"]["backbone"]["num_cnn_blocks"]),
-        stem_hidden_dims=list(config["model"]["backbone"]["stem_hidden_dims"]),
-        block_hidden_dim=int(config["model"]["backbone"]["block_hidden_dim"]),
-        readout_hidden_dim=int(config["model"]["backbone"]["readout_hidden_dim"]),
-        activation=str(config["model"]["backbone"]["activation"]),
-        num_subcarriers=int(config["data"]["num_subcarriers"]),
-        num_ofdm_symbols=int(config["data"]["num_ofdm_symbols"]),
-        bits_per_symbol=int(config["data"]["bits_per_symbol"]),
-        num_rx_antennas=int(config["data"]["num_rx_antennas"]),
-        pilot_symbol_indices=list(config["model"]["backbone"]["pilot_symbol_indices"]),
-        pilot_subcarrier_spacing=int(config["model"]["backbone"]["pilot_subcarrier_spacing"]),
-    )
+    model = build_model_from_config(config)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.to(device)
     model.eval()
@@ -115,7 +97,17 @@ def evaluate_dataset(
     failure_examples: list[dict[str, Any]] = []
     failure_grid_error_sum: np.ndarray | None = None
     failure_grid_failed_blocks = 0
+    all_selected_experts: list[int] = []
+    all_expected_flops: list[float] = []
+    all_realized_flops: list[float] = []
     sample_offset = 0
+
+    expert_names = list(getattr(model, "expert_names", []))
+    base_flops = float(getattr(model, "base_flops", torch.tensor(0.0)).item())
+    expert_flops_tensor = getattr(model, "expert_flops", None)
+    expert_flops: np.ndarray | None = None
+    if isinstance(expert_flops_tensor, torch.Tensor):
+        expert_flops = expert_flops_tensor.detach().cpu().numpy().astype(np.float64)
 
     for batch in tqdm(dataloader, desc="Evaluating", unit="batch"):
         batch: CachedNRXBatch
@@ -127,6 +119,20 @@ def evaluate_dataset(
         outputs = model(features)
         logits = outputs["logits"]
         channel_estimate = outputs["channel_estimate"]
+
+        selected_expert_index = outputs.get("selected_expert_index")
+        if isinstance(selected_expert_index, torch.Tensor):
+            selected_np = selected_expert_index.detach().cpu().numpy().astype(int)
+            all_selected_experts.extend(selected_np.tolist())
+            if expert_flops is not None:
+                all_realized_flops.extend((base_flops + expert_flops[selected_np]).tolist())
+
+        router_probs = outputs.get("router_probs")
+        if isinstance(router_probs, torch.Tensor) and expert_flops is not None:
+            expected_flops = base_flops + torch.sum(
+                router_probs * torch.as_tensor(expert_flops, device=router_probs.device), dim=-1
+            )
+            all_expected_flops.extend(expected_flops.detach().cpu().numpy().astype(np.float64).tolist())
 
         # Loss
         bce_loss = loss_fn(logits, targets)
@@ -261,6 +267,14 @@ def evaluate_dataset(
                 }
             )
 
+            if all_selected_experts and expert_names:
+                selected_array = np.array(all_selected_experts)
+                expert_counts = np.bincount(selected_array[mask], minlength=len(expert_names))
+                snr_binned_rows[-1]["expert_usage"] = {
+                    expert_name: float(expert_counts[index] / max(mask.sum(), 1))
+                    for index, expert_name in enumerate(expert_names)
+                }
+
         results["snr_binned"] = snr_binned
         results["snr_binned_rows"] = snr_binned_rows
 
@@ -285,6 +299,44 @@ def evaluate_dataset(
             for subcarrier_index in range(failure_grid.shape[0])
             for ofdm_symbol_index in range(failure_grid.shape[1])
         ]
+
+    if all_expected_flops:
+        results["expected_flops"] = float(np.mean(all_expected_flops))
+    if all_realized_flops:
+        results["realized_flops"] = float(np.mean(all_realized_flops))
+    if all_selected_experts and expert_names:
+        selected_array = np.array(all_selected_experts)
+        expert_counts = np.bincount(selected_array, minlength=len(expert_names))
+        results["expert_usage_rows"] = [
+            {
+                "expert": expert_name,
+                "usage": float(expert_counts[index] / max(selected_array.size, 1)),
+                "count": int(expert_counts[index]),
+                "num_samples": int(selected_array.size),
+            }
+            for index, expert_name in enumerate(expert_names)
+        ]
+
+        snr_binned_expert_rows: list[dict[str, Any]] = []
+        if snr_bins is not None and snr_bins > 0 and "snr_binned_rows" in results:
+            for snr_row in results["snr_binned_rows"]:
+                usage = snr_row.get("expert_usage")
+                if not usage:
+                    continue
+                for expert_name, expert_usage in usage.items():
+                    snr_binned_expert_rows.append(
+                        {
+                            "bin_index": snr_row["bin_index"],
+                            "snr_min": snr_row["snr_min"],
+                            "snr_max": snr_row["snr_max"],
+                            "snr_center": snr_row["snr_center"],
+                            "expert": expert_name,
+                            "usage": float(expert_usage),
+                            "num_samples": snr_row["num_samples"],
+                        }
+                    )
+        if snr_binned_expert_rows:
+            results["snr_binned_expert_rows"] = snr_binned_expert_rows
 
     return results
 
@@ -380,6 +432,10 @@ def print_results(results: dict[str, Any], dataset_name: str) -> None:
     print(f"  BLER:         {results['bler']:.4f} ({results['num_block_errors']:,} / {results['num_samples']:,})")
     print(f"  SER:          {results['ser']:.6e}")
     print(f"  Channel MSE:  {results['channel_mse']:.6f}")
+    if "realized_flops" in results:
+        print(f"  Realized FLOPs: {results['realized_flops']:.3e}")
+    if "expected_flops" in results:
+        print(f"  Expected FLOPs: {results['expected_flops']:.3e}")
 
     if "snr_binned" in results:
         print("\n  SNR-Binned BLER:")
@@ -557,6 +613,8 @@ def _log_results_to_wandb(
             "bler",
             "ser",
             "channel_mse",
+            "expected_flops",
+            "realized_flops",
             "num_samples",
             "dataset_artifact",
         ]
@@ -570,9 +628,15 @@ def _log_results_to_wandb(
     failure_grid_table = wandb.Table(
         columns=["profile", "subcarrier_index", "ofdm_symbol_index", "symbol_error_rate", "failed_block_count"]
     )
+    expert_usage_table = wandb.Table(columns=["profile", "expert", "usage", "count", "num_samples"])
+    expert_snr_table = wandb.Table(
+        columns=["profile", "bin_index", "snr_min", "snr_max", "snr_center", "expert", "usage", "num_samples"]
+    )
     snr_row_count = 0
     failure_row_count = 0
     failure_grid_row_count = 0
+    expert_usage_row_count = 0
+    expert_snr_row_count = 0
 
     for profile, results in all_results.items():
         scalar_metrics[f"eval/{profile}/loss_total"] = results["loss_total"]
@@ -582,6 +646,10 @@ def _log_results_to_wandb(
         scalar_metrics[f"eval/{profile}/ser"] = results["ser"]
         scalar_metrics[f"eval/{profile}/channel_mse"] = results["channel_mse"]
         scalar_metrics[f"eval/{profile}/num_samples"] = results["num_samples"]
+        if "expected_flops" in results:
+            scalar_metrics[f"eval/{profile}/expected_flops"] = results["expected_flops"]
+        if "realized_flops" in results:
+            scalar_metrics[f"eval/{profile}/realized_flops"] = results["realized_flops"]
         dataset_artifact = wandb.run.summary.get(f"artifacts/dataset/{profile}")
         comparison_table.add_data(
             profile,
@@ -600,6 +668,8 @@ def _log_results_to_wandb(
             results["bler"],
             results["ser"],
             results["channel_mse"],
+            results.get("expected_flops"),
+            results.get("realized_flops"),
             results["num_samples"],
             dataset_artifact,
         )
@@ -639,6 +709,30 @@ def _log_results_to_wandb(
             )
             failure_grid_row_count += 1
 
+        for expert_usage_row in results.get("expert_usage_rows", []):
+            expert_usage_table.add_data(
+                profile,
+                expert_usage_row["expert"],
+                expert_usage_row["usage"],
+                expert_usage_row["count"],
+                expert_usage_row["num_samples"],
+            )
+            scalar_metrics[f"eval/{profile}/expert_usage/{expert_usage_row['expert']}"] = expert_usage_row["usage"]
+            expert_usage_row_count += 1
+
+        for expert_snr_row in results.get("snr_binned_expert_rows", []):
+            expert_snr_table.add_data(
+                profile,
+                expert_snr_row["bin_index"],
+                expert_snr_row["snr_min"],
+                expert_snr_row["snr_max"],
+                expert_snr_row["snr_center"],
+                expert_snr_row["expert"],
+                expert_snr_row["usage"],
+                expert_snr_row["num_samples"],
+            )
+            expert_snr_row_count += 1
+
     wandb.log(scalar_metrics)
     tables_to_log: dict[str, Any] = {
         "eval/comparison": comparison_table,
@@ -650,6 +744,10 @@ def _log_results_to_wandb(
         tables_to_log["eval/failures"] = failure_table
     if failure_grid_row_count > 0:
         tables_to_log["eval/failure_grid"] = failure_grid_table
+    if expert_usage_row_count > 0:
+        tables_to_log["eval/expert_usage"] = expert_usage_table
+    if expert_snr_row_count > 0:
+        tables_to_log["eval/expert_usage_snr_binned"] = expert_snr_table
 
     snr_heatmap = _build_snr_heatmap_image(all_results)
     if snr_heatmap is not None:

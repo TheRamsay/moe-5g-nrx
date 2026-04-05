@@ -1,0 +1,23 @@
+# @package _global_
+# Experiment 06: Minimal Joint MoE v0
+
+defaults:
+  - override /model: moe
+  - override /dataset: mixed
+
+experiment:
+  batch_name: moe-joint-v0
+  exp_name: moe_joint_v0_large_ref_s67
+  tags: [moe, joint, compute-aware, synthetic, simo-1x4, 16qam]
+  notes: "Minimal joint MoE with shared stem, router, and small/mid/large experts. First run keeps compute penalty disabled to validate the architecture against the frozen dense baseline."
+  study_slug: 2026-04-05-moe-joint-v0
+  study_path: experiments/2026-04-05-moe-joint-v0
+  question: Can a minimal joint MoE match the frozen dense baseline before introducing a compute penalty?
+
+training:
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  max_steps: 10000
+
+validation:
+  every_n_steps: 500
