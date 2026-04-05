@@ -72,9 +72,16 @@ Training routing:
 
 **Locked hyperparameters for Phase 1:**
 - `beta = 0.1` (load-balance penalty)
-- `alpha` sweep: {1e-3, 5e-3, 1e-2} at 10k steps — **currently running** (jobs 18712100-18712102)
+- `alpha = 1e-3` (sweep winner — see `experiments/2026-04-05-moe-alpha-sweep-v1/README.md`)
 
-**Next after alpha sweep:** pick best alpha, run Phase 2.
+**Alpha sweep findings (jobs 18712100-18712102, finished):**
+- `alpha=5e-3` → full router collapse (large ~0%), entropy 40% of max — threshold effect, not gradual
+- `alpha=1e-2` → partial collapse (large ~29%), slow drift, entropy 55% of max
+- `alpha=1e-3` → perfect routing (all ~33%), entropy 99.9%, best val loss
+- BER nearly identical across all three; loss is the differentiator
+- Phase 1 matches dense large baseline; no real compute savings yet (soft gating, all experts active)
+
+**Phase 1 is complete. Proceed to Phase 2.**
 
 ## How This Compares To MEAN (van Bolderik et al., 2024)
 
