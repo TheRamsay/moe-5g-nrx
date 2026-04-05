@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import hydra
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from hydra.utils import to_absolute_path
@@ -112,6 +113,8 @@ def evaluate_dataset(
     all_bits_per_sample: list[int] = []
     all_block_errors: list[int] = []
     failure_examples: list[dict[str, Any]] = []
+    failure_grid_error_sum: np.ndarray | None = None
+    failure_grid_failed_blocks = 0
     sample_offset = 0
 
     for batch in tqdm(dataloader, desc="Evaluating", unit="batch"):
@@ -141,6 +144,8 @@ def evaluate_dataset(
             num_ofdm_symbols=features.shape[3],
         )
         bit_errors = error_metrics.bit_errors
+        bit_errors_grid = bit_errors.reshape(features.shape[0], bits_per_symbol, features.shape[2], features.shape[3])
+        symbol_errors_grid = bit_errors_grid.any(dim=1).to(dtype=torch.float32)
 
         # Per-sample bit errors (for SNR analysis)
         per_sample_bit_errors = bit_errors.sum(dim=1).cpu().numpy()
@@ -152,6 +157,15 @@ def evaluate_dataset(
         all_bit_errors.extend(per_sample_bit_errors.tolist())
         all_bits_per_sample.extend([per_sample_bits] * len(snr_db))
         all_block_errors.extend(per_sample_block_error.tolist())
+
+        failed_mask = error_metrics.block_errors.to(dtype=torch.bool)
+        failed_blocks = int(failed_mask.sum().item())
+        if failed_blocks > 0:
+            failed_symbol_errors = symbol_errors_grid[failed_mask].sum(dim=0).cpu().numpy()
+            if failure_grid_error_sum is None:
+                failure_grid_error_sum = np.zeros_like(failed_symbol_errors, dtype=np.float64)
+            failure_grid_error_sum += failed_symbol_errors
+            failure_grid_failed_blocks += failed_blocks
 
         if failure_examples_limit > 0:
             for idx, (sample_snr, sample_errors, sample_block_error, sample_ber_value) in enumerate(
@@ -258,7 +272,100 @@ def evaluate_dataset(
         )
         results["failure_examples"] = failure_examples_sorted[:failure_examples_limit]
 
+    if failure_grid_error_sum is not None and failure_grid_failed_blocks > 0:
+        failure_grid = failure_grid_error_sum / failure_grid_failed_blocks
+        results["failure_grid"] = failure_grid
+        results["failure_grid_rows"] = [
+            {
+                "subcarrier_index": subcarrier_index,
+                "ofdm_symbol_index": ofdm_symbol_index,
+                "symbol_error_rate": float(failure_grid[subcarrier_index, ofdm_symbol_index]),
+                "failed_block_count": failure_grid_failed_blocks,
+            }
+            for subcarrier_index in range(failure_grid.shape[0])
+            for ofdm_symbol_index in range(failure_grid.shape[1])
+        ]
+
     return results
+
+
+def _format_snr_bin_labels(all_results: dict[str, dict[str, Any]], max_bins: int) -> list[str]:
+    labels_per_profile: list[list[str]] = []
+    for results in all_results.values():
+        rows = list(results.get("snr_binned_rows", []))
+        if not rows:
+            continue
+        labels_per_profile.append([f"{row['snr_min']:.1f}-{row['snr_max']:.1f}" for row in rows[:max_bins]])
+
+    if not labels_per_profile:
+        return [str(index) for index in range(max_bins)]
+
+    first = labels_per_profile[0]
+    if all(labels == first for labels in labels_per_profile[1:]):
+        return first
+    return [f"bin {index}" for index in range(max_bins)]
+
+
+def _build_snr_heatmap_image(all_results: dict[str, dict[str, Any]]) -> wandb.Image | None:
+    profiles = [profile for profile, results in all_results.items() if results.get("snr_binned_rows")]
+    if not profiles:
+        return None
+
+    max_bins = max(len(all_results[profile].get("snr_binned_rows", [])) for profile in profiles)
+    ber_matrix = np.full((len(profiles), max_bins), np.nan, dtype=np.float64)
+    bler_matrix = np.full((len(profiles), max_bins), np.nan, dtype=np.float64)
+
+    for row_index, profile in enumerate(profiles):
+        for snr_row in all_results[profile].get("snr_binned_rows", []):
+            bin_index = int(snr_row["bin_index"])
+            if 0 <= bin_index < max_bins:
+                ber_matrix[row_index, bin_index] = float(snr_row["ber"])
+                bler_matrix[row_index, bin_index] = float(snr_row["bler"])
+
+    snr_labels = _format_snr_bin_labels({profile: all_results[profile] for profile in profiles}, max_bins)
+    fig, axes = plt.subplots(1, 2, figsize=(max(8, max_bins * 1.2), 4 + len(profiles) * 0.4), constrained_layout=True)
+    for axis, matrix, title in zip(axes, [ber_matrix, bler_matrix], ["BER", "BLER"]):
+        image = axis.imshow(matrix, aspect="auto", interpolation="nearest", cmap="viridis")
+        axis.set_title(f"SNR-Binned {title}")
+        axis.set_xlabel("SNR bin")
+        axis.set_ylabel("Profile")
+        axis.set_xticks(range(max_bins))
+        axis.set_xticklabels(snr_labels, rotation=45, ha="right")
+        axis.set_yticks(range(len(profiles)))
+        axis.set_yticklabels(profiles)
+        fig.colorbar(image, ax=axis, fraction=0.046, pad=0.04)
+
+    image = wandb.Image(fig)
+    plt.close(fig)
+    return image
+
+
+def _build_failure_grid_heatmap_image(all_results: dict[str, dict[str, Any]]) -> wandb.Image | None:
+    profiles = [profile for profile, results in all_results.items() if results.get("failure_grid") is not None]
+    if not profiles:
+        return None
+
+    fig, axes = plt.subplots(
+        1,
+        len(profiles),
+        figsize=(6 * len(profiles), 6),
+        constrained_layout=True,
+        squeeze=False,
+    )
+    axes_flat = axes[0]
+
+    for axis, profile in zip(axes_flat, profiles):
+        grid = np.asarray(all_results[profile]["failure_grid"], dtype=np.float64)
+        failed_block_count = int(all_results[profile]["failure_grid_rows"][0]["failed_block_count"])
+        image = axis.imshow(grid, aspect="auto", interpolation="nearest", cmap="magma", origin="lower")
+        axis.set_title(f"{profile} failed-block symbol error rate\nfailed blocks={failed_block_count}")
+        axis.set_xlabel("OFDM symbol")
+        axis.set_ylabel("Subcarrier")
+        fig.colorbar(image, ax=axis, fraction=0.046, pad=0.04)
+
+    image = wandb.Image(fig)
+    plt.close(fig)
+    return image
 
 
 def print_results(results: dict[str, Any], dataset_name: str) -> None:
@@ -460,8 +567,12 @@ def _log_results_to_wandb(
     failure_table = wandb.Table(
         columns=["profile", "sample_index", "snr_db", "bit_errors", "bits_per_sample", "ber", "block_error"]
     )
+    failure_grid_table = wandb.Table(
+        columns=["profile", "subcarrier_index", "ofdm_symbol_index", "symbol_error_rate", "failed_block_count"]
+    )
     snr_row_count = 0
     failure_row_count = 0
+    failure_grid_row_count = 0
 
     for profile, results in all_results.items():
         scalar_metrics[f"eval/{profile}/loss_total"] = results["loss_total"]
@@ -518,6 +629,16 @@ def _log_results_to_wandb(
             )
             failure_row_count += 1
 
+        for failure_grid_row in results.get("failure_grid_rows", []):
+            failure_grid_table.add_data(
+                profile,
+                failure_grid_row["subcarrier_index"],
+                failure_grid_row["ofdm_symbol_index"],
+                failure_grid_row["symbol_error_rate"],
+                failure_grid_row["failed_block_count"],
+            )
+            failure_grid_row_count += 1
+
     wandb.log(scalar_metrics)
     tables_to_log: dict[str, Any] = {
         "eval/comparison": comparison_table,
@@ -527,6 +648,17 @@ def _log_results_to_wandb(
         tables_to_log["eval/snr_binned"] = snr_table
     if failure_row_count > 0:
         tables_to_log["eval/failures"] = failure_table
+    if failure_grid_row_count > 0:
+        tables_to_log["eval/failure_grid"] = failure_grid_table
+
+    snr_heatmap = _build_snr_heatmap_image(all_results)
+    if snr_heatmap is not None:
+        tables_to_log["viz/snr_binned_error_heatmap"] = snr_heatmap
+
+    failure_grid_heatmap = _build_failure_grid_heatmap_image(all_results)
+    if failure_grid_heatmap is not None:
+        tables_to_log["viz/failure_grid_heatmap"] = failure_grid_heatmap
+
     wandb.log(tables_to_log)
 
     for key, value in scalar_metrics.items():

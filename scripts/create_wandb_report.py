@@ -91,6 +91,24 @@ def main(cfg: DictConfig) -> None:
                     ),
                 ],
             ),
+            wr.MarkdownBlock("## Error Heatmaps"),
+            _panel_grid(
+                eval_runs,
+                [
+                    wr.MediaBrowser(
+                        title="SNR-Binned Error Heatmaps",
+                        media_keys=["viz/snr_binned_error_heatmap"],
+                        mode="gallery",
+                        gallery_axis="run",
+                    ),
+                    wr.MediaBrowser(
+                        title="Failure Grid Heatmaps",
+                        media_keys=["viz/failure_grid_heatmap"],
+                        mode="gallery",
+                        gallery_axis="run",
+                    ),
+                ],
+            ),
             wr.MarkdownBlock("## Capacity Tradeoffs"),
             _panel_grid(
                 eval_runs,
