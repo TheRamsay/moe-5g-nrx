@@ -208,9 +208,7 @@ class Trainer:
             previous = self._train_metric_ema.get(key, value)
             ema_value = previous + self._train_metrics_ema_alpha * (value - previous)
             self._train_metric_ema[key] = ema_value
-            self._train_metric_windows[key].append(value)
             smoothed[f"ema/{key}"] = ema_value
-            smoothed[f"window/{key}"] = self._mean(self._train_metric_windows[key])
 
         profile = str(metrics["channel_profile"])
         for key in numeric_metric_keys:
@@ -218,10 +216,7 @@ class Trainer:
             previous = self._profile_metric_ema[profile].get(key, value)
             ema_value = previous + self._train_metrics_ema_alpha * (value - previous)
             self._profile_metric_ema[profile][key] = ema_value
-            self._profile_metric_windows[profile][key].append(value)
-            smoothed[f"profile/{profile}/{key}"] = value
             smoothed[f"profile/{profile}/ema/{key}"] = ema_value
-            smoothed[f"profile/{profile}/window/{key}"] = self._mean(self._profile_metric_windows[profile][key])
 
         return smoothed
 
