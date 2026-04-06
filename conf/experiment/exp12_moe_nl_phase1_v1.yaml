@@ -1,0 +1,30 @@
+# @package _global_
+# Experiment 12: MoE Phase 1 with nano/small/large expert range (state_dim=32)
+# Tests whether the wider expert range (block_dim 8/32/64) gives the router
+# a stronger quality signal than the original 32/48/64 range.
+
+defaults:
+  - override /model: moe_nl
+  - override /dataset: mixed
+
+experiment:
+  batch_name: moe-nl-phase1-v1
+  exp_name: moe_nl_phase1_v1_a1e_3_b0p1_s67
+  tags: [moe, joint, compute-aware, synthetic, simo-1x4, 16qam, nl-range]
+  notes: "MoE Phase 1 with wider nano/small/large expert range (block_dim 8/32/64) and state_dim=32. Tests whether routing differentiation improves vs original 32/48/64 range."
+  study_slug: 2026-04-06-moe-nl-phase1-v1
+  study_path: experiments/2026-04-06-moe-nl-phase1-v1
+  question: Does the wider nano/small/large expert range produce stronger routing differentiation?
+
+model:
+  compute:
+    flops_penalty_alpha: 1e-3
+    load_balance_beta: 0.1
+
+training:
+  learning_rate: 1e-3
+  weight_decay: 1e-4
+  max_steps: 10000
+
+validation:
+  every_n_steps: 500

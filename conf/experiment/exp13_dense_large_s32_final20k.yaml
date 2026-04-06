@@ -1,0 +1,28 @@
+# @package _global_
+# Experiment 13: Dense Large with state_dim=32, finalized to 20k steps.
+# stem_s32 matched large at 10k steps — this confirms it holds at 20k
+# and produces the warm-start checkpoint for a redesigned MoE Phase 2.
+
+defaults:
+  - override /model: static_dense
+  - override /dataset: mixed
+
+experiment:
+  batch_name: dense-large-s32-finalization-v1
+  exp_name: dense_large_s32_final20k_constant_lr_s67
+  tags: [baseline, dense, capacity, synthetic, simo-1x4, 16qam, stem-bottleneck]
+  notes: "Large dense with state_dim=32, stem=[32,32]. Finalized to 20k for MoE Phase 2 warm-start with reduced stem."
+  study_slug: 2026-04-06-dense-large-s32-finalization-v1
+  study_path: experiments/2026-04-06-dense-large-s32-finalization-v1
+  question: Does state_dim=32 match state_dim=56 large at 20k? Provides warm-start for redesigned MoE.
+
+model:
+  backbone:
+    stem_hidden_dims: [32, 32]
+    state_dim: 32
+    num_cnn_blocks: 8
+    block_hidden_dim: 64
+    readout_hidden_dim: 128
+
+training:
+  max_steps: 20000

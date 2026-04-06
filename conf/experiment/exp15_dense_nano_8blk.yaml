@@ -1,0 +1,26 @@
+# @package _global_
+# Experiment 15: Nano depth variant — 8 blocks.
+# Isolates depth effect: block_dim=8 fixed, stem=[64,64] fixed, only num_cnn_blocks varies.
+
+defaults:
+  - override /model: static_dense
+  - override /dataset: mixed
+
+experiment:
+  batch_name: dense-nano-depth-v1
+  exp_name: dense_nano_8blk_s56_h8_lr1e3_s67
+  tags: [baseline, dense, capacity, synthetic, simo-1x4, 16qam, capacity-floor]
+  notes: "Nano depth variant: block_hidden_dim=8, num_cnn_blocks=8. Stem=[64,64] fixed. Tests depth sensitivity at nano scale."
+  study_slug: 2026-04-06-dense-nano-depth-v1
+  study_path: experiments/2026-04-06-dense-nano-depth-v1
+  question: Does depth matter at nano scale (block_hidden_dim=8)?
+
+model:
+  backbone:
+    stem_hidden_dims: [64, 64]
+    num_cnn_blocks: 8
+    block_hidden_dim: 8
+    readout_hidden_dim: 32
+
+training:
+  max_steps: 10000

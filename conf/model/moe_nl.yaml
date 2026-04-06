@@ -1,0 +1,46 @@
+name: compute_aware_moe_nrx
+family: moe
+
+shared_stem:
+    state_dim: 32
+    stem_hidden_dims: [32, 32]
+    activation: relu
+    pilot_symbol_indices: [2, 11]
+    pilot_subcarrier_spacing: 2
+
+backbone:
+    pilot_symbol_indices: ${model.shared_stem.pilot_symbol_indices}
+    pilot_subcarrier_spacing: ${model.shared_stem.pilot_subcarrier_spacing}
+
+router:
+    type: channel_aware
+    hidden_dim: 64
+    training_gate: gumbel_softmax
+    inference_gate: top1
+    temperature: 1.0
+    min_temperature: 0.5
+    use_input_statistics: false
+
+# Wider expert range: nano/small/large (block_dim 8/32/64)
+# state_dim=32 throughout — stem is the bottleneck, not the backbone
+experts:
+    nano:
+        num_cnn_blocks: 4
+        block_hidden_dim: 8
+        readout_hidden_dim: 32
+    small:
+        num_cnn_blocks: 8
+        block_hidden_dim: 32
+        readout_hidden_dim: 96
+    large:
+        num_cnn_blocks: 8
+        block_hidden_dim: 64
+        readout_hidden_dim: 128
+
+compute:
+    routing: sparse
+    active_experts: 1
+    flops_penalty_alpha: 0.0
+    load_balance_beta: 0.0
+    flops_normalizer: 1.0
+    channel_loss_weight: 0.05
