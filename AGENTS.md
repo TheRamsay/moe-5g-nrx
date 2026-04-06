@@ -102,18 +102,54 @@ Large backbone fixed (block_dim=64, 8 blocks). Only state_dim and stem_hidden_di
 channel_mse is 3× worse, indicating the bottleneck is **channel estimation capacity**, not
 decoding. Safe working point: state_dim=32.
 
-### Revised MoE Expert Design
-The original expert range (block_dim 32/48/64) is too narrow — backbone capacity barely
-affects BER and shows only modest BLER differences. Redesigned expert family:
+### Waterfall BLER Comparison (`2026-04-06-waterfall-compare-v1`)
+Fine-grained (2 dB) SNR sweep across nano/small/large_s32/large_s56. Key finding: expert
+size produces large BLER gaps **in the waterfall region only** — average BER/BLER masks this.
+
+| SNR (dB) | nano | small | large_s32 | large_s56 |
+|---|---|---|---|---|
+| 13 | 0.996 | 0.998 | 0.989 | 0.969 |
+| 15 | 0.922 | 0.834 | 0.779 | 0.649 |
+| **17** | **0.722** | **0.548** | **0.436** | **0.284** |
+| 19 | 0.452 | 0.310 | 0.244 | 0.105 |
+
+Gap at SNR=17: nano→large_s56 = **44pp**. This justifies MoE routing.
+UMA waterfall is much weaker (5-8pp gaps, waterfall not complete in eval range).
+
+### Revised MoE Expert Design (Final)
+The original expert range (block_dim 32/48/64) is too narrow. Redesigned with wider range
+and **state_dim=56** (reverted from s32 — see rationale below):
 
 | Expert | block_dim | num_blocks | readout_dim | state_dim |
 |---|---:|---:|---:|---:|
-| nano | 8 | 4 | 32 | 32 |
-| small | 32 | 8 | 96 | 32 |
-| large | 64 | 8 | 128 | 32 |
+| nano | 8 | 4 | 32 | 56 |
+| small | 32 | 8 | 96 | 56 |
+| large | 64 | 8 | 128 | 56 |
 
-Rationale: wider range (8→64 vs 32→64), state_dim=32 reduces stem FLOPs and makes the
-backbone capacity fraction larger relative to total, so routing has more FLOPs impact.
+**Why state_dim=56, not 32:** In the MoE the stem is shared — state_dim doesn't affect
+per-expert FLOPs differentiation. Routing nano vs large saves ~80% FLOPs with s56 vs ~82%
+with s32 (negligible). But s32 costs 15pp BLER in the TDLC waterfall (large_s32 BLER=0.436
+vs large_s56 BLER=0.284 at SNR=17). Bad trade. Use s56.
+
+**FLOPs breakdown (s56, large model as reference):**
+- Shared stem: 285M FLOPs (fixed, always paid)
+- Nano expert: 35M FLOPs
+- Large expert: 1319M FLOPs
+- Total nano: 320M (20% of large total) → routing to nano saves **80% FLOPs**
+
+### Nano Depth Study (`2026-04-06-dense-nano-depth-v1`)
+Depth (2/4/8 blocks) barely matters at nano scale — differences are noise-level.
+4 blocks is the confirmed choice for the nano expert.
+
+### Warm-Start Checkpoints for Phase 2 (all s56, 20k steps, READY)
+
+| Expert | Params | TDLC BLER@SNR17 | Artifact |
+|---|---:|---:|---|
+| nano | 90k | 0.674 | `model-dense_nano_final20k_constant_lr_s67-aos4hhid:best` |
+| small | 168k | 0.548 | `model-dense_small_final20k_constant_lr_s67-kivdz4qu:best` |
+| large | 450k | 0.284 | `model-dense_large_final20k_constant_lr_s67-55l1dpby:best` |
+
+All three checkpoints use state_dim=56. Phase 2 can start immediately.
 
 ### SNR-Binned Validation Metrics
 Training now logs per-SNR-bin BER/BLER/SER as timeseries during validation (every 500 steps).
@@ -142,25 +178,17 @@ This makes the high-SNR waterfall shift visible during training without waiting 
 
 **Phase 1 is complete. Original dense expert checkpoints are finalized. See Phase 2 redesign below.**
 
-## Phase 2 Redesign (Current Direction)
+## Phase 2 (Current Direction — Ready to Start)
 
-The original Phase 2 plan (warm-start small/mid/large experts) is superseded by the revised
-expert family above. The new plan:
+All warm-start checkpoints are finalized (see above). MoE NL Phase 1 confirmed routing
+differentiates: TDLC→large (43%), UMA→nano (36%), overall entropy=0.85.
 
-**Expert checkpoints needed for warm-start (in progress):**
-- `nano`: `2026-04-06-dense-nano-finalization-v1` — job `18723723`, 20k steps
-- `small`: `knn_moe-5g-nrx/moe-5g-nrx/model-dense_small_final20k_constant_lr_s67-kivdz4qu:best` (existing)
-- `large_s32`: `2026-04-06-dense-large-s32-finalization-v1` — job `18723729`, 20k steps
-
-**MoE NL Phase 1 (joint from scratch, wider range):**
-- Job `18723728`, study `2026-04-06-moe-nl-phase1-v1`
-- Confirms routing differentiates before committing to warm-start Phase 2
-- Watch: router entropy, per-expert utilization by SNR bin
-
-**Planned Phase 2 stages (same as before):**
+**Planned Phase 2 stages:**
 1. Freeze experts → train router only (~2-3k steps)
 2. Unfreeze → joint fine-tune (~10k steps) with alpha=1e-3, beta=0.1
 3. Evaluate on **BLER@high-SNR vs realized FLOPs** Pareto curve
+
+**Locked hyperparameters:** `alpha=1e-3`, `beta=0.1` (inherited from Phase 1).
 
 ## Original Phase 2 Setup (superseded)
 
@@ -206,11 +234,24 @@ MEAN is the closest prior work. Key differences:
 - Expert utilization by SNR bin and by profile
 - Router entropy (collapse diagnostic)
 
+## GPU Utilization & Training Data
+
+On-the-fly Sionna generation is the training bottleneck — 6.9x slower than the GPU training
+step on an A40 (483ms gen vs 70ms step). GPU sits idle ~87% of the time.
+
+**Fix in progress:** 500k-sample cached training dataset being generated at
+`~/moe-5g-datasets/train-500k-v1/train/{uma,tdlc}.pt` (job 18730966).
+CPU-pinned Sionna profiling pending (job 18730965) to determine if CPU gen + workers
+can achieve meaningful GPU overlap as a cheaper alternative.
+
+Storage: ~48 KB/sample → 500k samples ≈ 24 GB per profile.
+
 ## Key Rules For Future Work
 
-- **Same dataset version** (`dense-v1`) across all MoE experiments
+- **Same dataset version** (`dense-v1`) across all MoE experiments for val/test
 - **Same val/test protocol** (cached uma + tdlc, 7 SNR bins)
 - **Same FLOP accounting** (realized FLOPs at inference for Pareto, not expected)
 - **Compare MoE against tuned local dense baseline**, not paper numbers
 - **Multi-seed (≥3)** only for final chosen model variants — not during exploration
 - **Test set is locked** — run evaluate.py on test split exactly once per final model variant
+- **state_dim=56** for all MoE experiments — do not use s32 (costs 15pp waterfall BLER)

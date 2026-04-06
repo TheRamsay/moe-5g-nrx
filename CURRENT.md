@@ -2,75 +2,74 @@
 
 ## What We Learned Today
 
-### Capacity floor (capacity-floor-v1)
-- nano (block_dim=8, 4 blk, 90k params) best_score=0.2064 vs small (168k) ~0.202 at 10k steps
-- **BER gap is tiny** (~1-2pp) but **BLER gap is real** (~7-8pp TDLC at same steps)
-- The BER metric was masking capacity signal — BLER is the right metric going forward
-- The waterfall transition width is real but the 7-bin eval spacing was too coarse to see it
+### Waterfall BLER comparison (waterfall-compare-v1)
+- Fine-grained 2 dB SNR sweep: nano/small/large_s32/large_s56 on val data
+- **TDLC SNR=17: nano BLER=0.722, large_s56 BLER=0.284 → 44pp gap**
+- Average BER/BLER was masking this — all the signal is in the waterfall region
+- UMA waterfall is weak (5-8pp gaps), UMA curve barely drops even at SNR=24
+- **Expert size matters. MoE direction is justified.**
 
-### Stem bottleneck (stem-bottleneck-v1)
-- state_dim=32 matches large (best_score=0.2016 vs ~0.199) — lossless stem compression
-- state_dim=16 degrades: best_score=0.2156, TDLC channel_mse=0.200 vs 0.064 for large (~3×)
-- The bottleneck at state_dim=16 is specifically **channel estimation**, not decoding
-- Safe working point: state_dim=32, stem=[32,32]
+### state_dim decision: stay at s56
+- state_dim=32 was supposed to save stem FLOPs and increase routing leverage
+- But stem is SHARED in MoE — state_dim doesn't affect per-expert FLOPs differentiation
+- Routing savings: s56=80% vs s32=82% — difference is 2pp, negligible
+- Cost of s32: 15pp worse BLER at SNR=17 (large_s32=0.436 vs large_s56=0.284)
+- **Verdict: use state_dim=56 throughout. The s32 checkpoints are reference-only.**
 
-### Revised MoE direction
-- Original expert range (block_dim 32/48/64) is too narrow — backbone barely matters in BER
-- Wider range needed: **nano/small/large = block_dim 8/32/64**
-- Use state_dim=32 throughout — matches quality of state_dim=56, cheaper, makes backbone matter more
-- Primary evaluation metric: **BLER at high-SNR bins**, not average BER
+### Phase 2 warm-start checkpoints: all ready
+- nano (s56, 20k): `model-dense_nano_final20k_constant_lr_s67-aos4hhid:best` ✓
+- small (s56, 20k): `model-dense_small_final20k_constant_lr_s67-kivdz4qu:best` ✓
+- large (s56, 20k): `model-dense_large_final20k_constant_lr_s67-55l1dpby:best` ✓
+- All three use state_dim=56. Phase 2 can start immediately.
+
+### Nano depth: doesn't matter
+- 2 blk / 4 blk / 8 blk at nano scale → all within noise
+- Keep 4 blocks for nano expert
+
+### GPU utilization: Sionna is the bottleneck
+- Profiled on A40: GPU training step = 70ms, Sionna gen (GPU, workers=0) = 483ms
+- GPU is idle ~87% of training time
+- GPU workers=2 helps somewhat (308ms) but Sionna fights PyTorch for GPU memory (OOM)
+- `set_visible_devices` can't be called after TF init → CPU mode needs --force-cpu flag at startup
+- CPU profiling results pending (job 18730965)
 
 ---
 
 ## Currently Running Jobs (MetaCentrum)
 
-| Job ID | Name | Steps | GPU | Purpose |
-|---|---|---|---|---|
-| `18723723` | nano_final20k | 20k | 16gb | warm-start checkpoint for redesigned MoE |
-| `18723728` | moe_nl_phase1_v1 | 10k | 46gb | Phase 1 with nano/small/large + state_dim=32 |
-| `18723729` | large_s32_final20k | 20k | 16gb | warm-start checkpoint for redesigned MoE |
-| `18723730` | nano_2blk_depth | 10k | 16gb | does depth matter at nano scale? |
-| `18723731` | nano_8blk_depth | 10k | 16gb | does depth matter at nano scale? |
-
-Previously submitted (should be done):
-- `18721569` nano 10k (capacity floor)
-- `18721570` micro 10k (capacity floor)
-- `18721574` stem_s32 10k (stem bottleneck)
-- `18721575` stem_s16 10k (stem bottleneck)
+| Job ID | Name | Purpose |
+|---|---|---|
+| `18730965` | profile_dataloader --force-cpu | Measure CPU Sionna gen speed to estimate GPU overlap |
+| `18730966` | generate-train-500k-v1 | 500k cached training samples per profile |
 
 ---
 
-## Waiting On Before Next Step
+## Waiting On
 
-1. **nano_final20k** (`18723723`) — need this checkpoint for MoE Phase 2 warm-start
-2. **large_s32_final20k** (`18723729`) — need this checkpoint for MoE Phase 2 warm-start
-3. **moe_nl_phase1_v1** (`18723728`) — check router entropy + expert utilization to confirm wider range differentiates
-
-Once these three are done, the redesigned MoE Phase 2 (warm-started nano/small/large, state_dim=32) can begin.
+1. **CPU profiling (18730965)** — tells us if CPU Sionna + workers achieves meaningful GPU overlap
+   - If gen_cpu_w2 < ~150ms → worth wiring up (GPU util >50%)
+   - If gen_cpu_w2 > ~300ms → cached training data is the better fix
+2. **Training cache (18730966)** — 500k samples/profile to `~/moe-5g-datasets/train-500k-v1/train/`
+   - ~24 GB per profile, ~2-3 hours generation time
+   - Will need: hook up training to use cached data instead of on-the-fly Sionna
 
 ---
 
-## Immediate Next Steps (after jobs finish)
+## Immediate Next Steps
 
-1. Check `moe_nl_phase1_v1` routing metrics in W&B:
-   - Router entropy should stay high (>0.85) — if not, revisit beta
-   - Expert utilization should split meaningfully across SNR bins
-   - BLER per SNR bin should show nano being used for easy conditions, large for hard
-
-2. Run evals on nano_final20k and large_s32_final20k checkpoints (same eval script)
-
-3. If MoE NL Phase 1 routing looks good → set up Phase 2 warm-start:
-   - Freeze experts, train router ~2-3k steps
-   - Unfreeze, joint fine-tune ~10k steps
-   - Evaluate on BLER@high-SNR vs realized FLOPs Pareto curve
-
-4. Update AGENTS.md with nano and large_s32 final checkpoint artifacts once evals are done
+1. Check CPU profiling results → decide on GPU utilization fix strategy
+2. Once training cache is ready → add `cached` training mode (point dataloader at .pt files)
+3. **Set up Phase 2 warm-start experiment:**
+   - Stage 1: freeze experts, train router ~2-3k steps
+   - Stage 2: unfreeze, joint fine-tune ~10k steps (alpha=1e-3, beta=0.1)
+   - Evaluate: BLER@high-SNR vs realized FLOPs Pareto curve
+4. Update AGENTS.md with Phase 2 experiment artifacts once done
 
 ---
 
 ## Open Questions
 
-- Does the MoE NL Phase 1 route differently across SNR bins vs the old small/mid/large MoE?
-- Does depth matter for nano (2 vs 4 vs 8 blocks)? Informs final expert design.
-- Is BLER@high-SNR the right Pareto axis, or should we use BLER at a specific operating SNR?
-- Should small expert also be retrained with state_dim=32 for warm-start, or keep the existing 20k checkpoint?
+- CPU Sionna speed: fast enough to overlap with GPU training, or not?
+- Should training use cached data exclusively, or hybrid (cached + on-the-fly refresh)?
+- Is 500k samples enough diversity for 20k training steps (1.28M samples → ~2.5 cycles)?
+- Phase 2: does warm-start actually improve over joint-from-scratch (MoE NL Phase 1)?
