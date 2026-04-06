@@ -106,10 +106,16 @@ def _make_minimal_model():
     return build_model_from_config(OmegaConf.create(config))
 
 
-def profile_sionna(num_workers: int = 0):
+def profile_sionna(num_workers: int = 0, force_cpu: bool = False):
+    label = f"num_workers={num_workers}" + (", TF=CPU" if force_cpu else ", TF=GPU")
     print(f"\n{'='*55}")
-    print(f"  Sionna generation  (num_workers={num_workers})")
+    print(f"  Sionna generation  ({label})")
     print(f"{'='*55}")
+
+    if force_cpu:
+        import tensorflow as tf
+
+        tf.config.set_visible_devices([], "GPU")
 
     cfg = _make_sionna_cfg()
     cfg.dataset.loader.num_workers = num_workers
@@ -194,29 +200,24 @@ def main():
     step_time = profile_training_step(model)
     del model
 
-    # Profile Sionna with num_workers=0 (current default)
-    gen_time_0 = profile_sionna(num_workers=0)
+    gen_time_gpu_0 = profile_sionna(num_workers=0, force_cpu=False)
+    gen_time_gpu_2 = profile_sionna(num_workers=2, force_cpu=False)
+    gen_time_cpu_1 = profile_sionna(num_workers=1, force_cpu=True)
+    gen_time_cpu_2 = profile_sionna(num_workers=2, force_cpu=True)
 
-    # Profile Sionna with num_workers=2
-    gen_time_2 = profile_sionna(num_workers=2)
-
-    # Summary
     print(f"\n{'='*55}")
     print("  SUMMARY")
     print(f"{'='*55}")
-    print(f"  GPU training step        : {step_time*1000:7.1f} ms")
-    print(f"  Sionna gen (workers=0)   : {gen_time_0*1000:7.1f} ms")
-    print(f"  Sionna gen (workers=2)   : {gen_time_2*1000:7.1f} ms")
-    ratio_0 = gen_time_0 / step_time
-    ratio_2 = gen_time_2 / step_time
-    print(f"\n  Gen/step ratio (w=0)     : {ratio_0:.1f}x  ", end="")
-    if ratio_0 < 1.5:
-        print("✓ gen is fast, workers should help")
-    elif ratio_0 < 5.0:
-        print("⚠ gen is slower, some benefit from workers")
-    else:
-        print("✗ gen is bottleneck, workers won't fully solve it")
-    print(f"  Gen/step ratio (w=2)     : {ratio_2:.1f}x")
+    print(f"  GPU training step              : {step_time*1000:7.1f} ms")
+    print(f"  Sionna GPU (workers=0)         : {gen_time_gpu_0*1000:7.1f} ms  ({gen_time_gpu_0/step_time:.1f}x)")
+    print(f"  Sionna GPU (workers=2)         : {gen_time_gpu_2*1000:7.1f} ms  ({gen_time_gpu_2/step_time:.1f}x)")
+    print(f"  Sionna CPU (workers=1)         : {gen_time_cpu_1*1000:7.1f} ms  ({gen_time_cpu_1/step_time:.1f}x)")
+    print(f"  Sionna CPU (workers=2)         : {gen_time_cpu_2*1000:7.1f} ms  ({gen_time_cpu_2/step_time:.1f}x)")
+    print()
+    print("  Effective GPU util if CPU+workers=2:")
+    overlap_util = step_time / max(gen_time_cpu_2, step_time)
+    print(f"    gen_cpu_2={gen_time_cpu_2*1000:.0f}ms vs step={step_time*1000:.0f}ms")
+    print(f"    estimated GPU utilization: {overlap_util*100:.0f}%")
     print()
 
 
