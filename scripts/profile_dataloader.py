@@ -63,13 +63,17 @@ def _make_sionna_cfg(profile: str = "tdlc"):
                 "dc_null": True,
                 "use_pilots": True,
                 "normalize_channel": True,
+                "max_batches_per_epoch": 0,
+                "loader": {
+                    "num_workers": 0,
+                    "pin_memory": False,
+                    "prefetch_factor": 2,
+                    "persistent_workers": True,
+                },
             },
-            "loader": {
-                "num_workers": 0,
-                "pin_memory": False,
-                "prefetch_factor": 2,
-                "persistent_workers": True,
+            "training": {
                 "batch_size": BATCH_SIZE,
+                "overfit_single_batch": False,
             },
             "runtime": {"seed": 67},
         }
@@ -108,7 +112,7 @@ def profile_sionna(num_workers: int = 0):
     print(f"{'='*55}")
 
     cfg = _make_sionna_cfg()
-    cfg.loader.num_workers = num_workers
+    cfg.dataset.loader.num_workers = num_workers
 
     loader = build_dataloader(cfg)
 
