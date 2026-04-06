@@ -62,12 +62,12 @@ case "$MODE" in
   local)
     echo ">>> Running locally"
     # shellcheck disable=SC2206
-    local run_args=( $(build_args) )
+    run_args=( $(build_args) )
     uv run python main.py "${run_args[@]}"
     ;;
   qsub)
     echo ">>> Submitting dense_nano_final20k_constant_lr_s67"
-    local qsub_args=(-l "walltime=$WALLTIME")
+    qsub_args=(-l "walltime=$WALLTIME")
     if [[ -n "$SELECT_RESOURCES" ]]; then
       qsub_args+=(-l "$SELECT_RESOURCES")
     fi
