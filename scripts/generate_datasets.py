@@ -42,6 +42,9 @@ def build_config(profile: str, batch_size: int, seed: int) -> DictConfig:
     return cfg
 
 
+_CHUNK_SIZE = 100_000  # Restart TF/Sionna session every N samples to prevent memory leak
+
+
 def generate_dataset(
     profile: str,
     num_samples: int,
@@ -50,6 +53,10 @@ def generate_dataset(
     desc: str = "",
 ) -> dict[str, Any]:
     """Generate a dataset for a single channel profile.
+
+    Internally splits generation into chunks of _CHUNK_SIZE, rebuilding the
+    Sionna/TF dataloader each chunk to prevent TF session memory leaks that
+    cause generation to stall on large datasets.
 
     Args:
         profile: Channel profile name (awgn, uma, tdlc).
@@ -63,61 +70,76 @@ def generate_dataset(
     """
     from src.data import build_dataloader
 
-    num_batches = (num_samples + batch_size - 1) // batch_size
-    cfg = build_config(profile, batch_size, seed)
+    chunks_needed = (num_samples + _CHUNK_SIZE - 1) // _CHUNK_SIZE
+    progress_desc = desc or f"Generating {profile}"
 
-    # Update config to sync dimensions
-    with open_dict(cfg):
-        cfg.data.num_subcarriers = int(cfg.dataset.num_subcarriers)
-        cfg.data.num_ofdm_symbols = int(cfg.dataset.num_ofdm_symbols)
-        # Dataloader uses this as a hard stop; raise it to satisfy requested samples.
-        cfg.dataset.max_batches_per_epoch = int(num_batches)
-
-    dataloader = build_dataloader(cfg)
-
-    # Pre-allocate output tensors using first batch to determine shapes,
-    # avoiding large list accumulation + torch.cat (which needs 2× peak RAM).
+    # Pre-allocate output tensors; shapes determined from first batch.
     inputs: torch.Tensor | None = None
     bit_labels: torch.Tensor | None = None
     channel_target: torch.Tensor | None = None
     snr_db: torch.Tensor | None = None
+    meta_cfg = None
 
-    collected = 0
+    total_collected = 0
 
-    progress_desc = desc or f"Generating {profile}"
-    with tqdm(total=num_samples, desc=progress_desc, unit="samples") as pbar:
-        for batch_idx, batch in enumerate(dataloader):
-            if batch_idx >= num_batches:
-                break
+    for chunk_idx in range(chunks_needed):
+        chunk_size = min(_CHUNK_SIZE, num_samples - total_collected)
+        chunk_seed = seed + chunk_idx  # vary seed so chunks aren't identical
+        num_batches = (chunk_size + batch_size - 1) // batch_size
 
-            remaining = num_samples - collected
-            take = min(batch_size, remaining)
+        cfg = build_config(profile, batch_size, chunk_seed)
+        with open_dict(cfg):
+            cfg.data.num_subcarriers = int(cfg.dataset.num_subcarriers)
+            cfg.data.num_ofdm_symbols = int(cfg.dataset.num_ofdm_symbols)
+            cfg.dataset.max_batches_per_epoch = int(num_batches)
 
-            b_inputs = batch.inputs[:take].cpu()
-            b_bit_labels = batch.bit_labels[:take].cpu()
-            b_channel_target = batch.channel_target[:take].cpu()
-            b_snr_db = batch.snr_db[:take].cpu()
+        if meta_cfg is None:
+            meta_cfg = cfg  # save for metadata (profile/modulation/snr range)
 
-            if inputs is None:
-                inputs = torch.empty(num_samples, *b_inputs.shape[1:], dtype=b_inputs.dtype)
-                bit_labels = torch.empty(num_samples, *b_bit_labels.shape[1:], dtype=b_bit_labels.dtype)
-                channel_target = torch.empty(num_samples, *b_channel_target.shape[1:], dtype=b_channel_target.dtype)
-                snr_db = torch.empty(num_samples, *b_snr_db.shape[1:], dtype=b_snr_db.dtype)
+        dataloader = build_dataloader(cfg)
+        chunk_collected = 0
+        chunk_label = f" [chunk {chunk_idx + 1}/{chunks_needed}]" if chunks_needed > 1 else ""
 
-            inputs[collected : collected + take] = b_inputs
-            bit_labels[collected : collected + take] = b_bit_labels
-            channel_target[collected : collected + take] = b_channel_target
-            snr_db[collected : collected + take] = b_snr_db
+        with tqdm(total=chunk_size, desc=progress_desc + chunk_label, unit="samples") as pbar:
+            for batch_idx, batch in enumerate(dataloader):
+                if batch_idx >= num_batches:
+                    break
 
-            collected += take
-            pbar.update(take)
+                remaining = chunk_size - chunk_collected
+                take = min(batch_size, remaining)
 
-            if collected >= num_samples:
-                break
+                b_inputs = batch.inputs[:take].cpu()
+                b_bit_labels = batch.bit_labels[:take].cpu()
+                b_channel_target = batch.channel_target[:take].cpu()
+                b_snr_db = batch.snr_db[:take].cpu()
+
+                if inputs is None:
+                    inputs = torch.empty(num_samples, *b_inputs.shape[1:], dtype=b_inputs.dtype)
+                    bit_labels = torch.empty(num_samples, *b_bit_labels.shape[1:], dtype=b_bit_labels.dtype)
+                    channel_target = torch.empty(num_samples, *b_channel_target.shape[1:], dtype=b_channel_target.dtype)
+                    snr_db = torch.empty(num_samples, *b_snr_db.shape[1:], dtype=b_snr_db.dtype)
+
+                pos = total_collected + chunk_collected
+                inputs[pos : pos + take] = b_inputs
+                bit_labels[pos : pos + take] = b_bit_labels
+                channel_target[pos : pos + take] = b_channel_target
+                snr_db[pos : pos + take] = b_snr_db
+
+                chunk_collected += take
+                pbar.update(take)
+
+                if chunk_collected >= chunk_size:
+                    break
+
+        del dataloader
+        gc.collect()
+        total_collected += chunk_collected
 
     assert inputs is not None, "No batches were generated"
+    assert meta_cfg is not None
 
-    # Build metadata
+    # Build metadata using config from first chunk (profile/modulation/SNR range don't vary)
+    cfg = meta_cfg
     simulator_config = {
         "num_subcarriers": int(cfg.dataset.num_subcarriers),
         "num_ofdm_symbols": int(cfg.dataset.num_ofdm_symbols),
