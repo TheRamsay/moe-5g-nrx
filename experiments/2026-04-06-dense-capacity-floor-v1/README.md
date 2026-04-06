@@ -59,14 +59,19 @@ bash experiments/2026-04-06-dense-capacity-floor-v1/submit.sh qsub
 
 ## Results
 
-| Run | val TDLC BER | val UMA BER | best score | Notes |
-|---|---|---|---|---|
-| nano  | — | — | — | |
-| micro | — | — | — | |
+| Run | Params | val TDLC BER | val UMA BER | best score | val TDLC BLER | val UMA BLER |
+|---|---:|---|---|---|---|---|
+| nano  | 90k  | 0.1323 | 0.2814 | 0.2064 | 0.9711 | 0.9753 |
+| micro | 104k | 0.1296 | 0.2791 | 0.2044 | 0.9492 | 0.9617 |
+| *small (20k ref)* | *168k* | *0.1251* | *0.2751* | *0.2001* | *0.9109* | *0.9513* |
+| *large (20k ref)* | *450k* | *0.1221* | *0.2683* | *0.1965* | *0.8660* | *0.9361* |
 
 ## Interpretation
 
-- If nano ≈ small: task is capacity-insensitive above ~90k params. MoE needs fundamentally
-  different expert differentiation (depth, stem size, or a different architecture).
-- If nano >> small: there is a quality cliff between 90k and 168k params. The MoE expert
-  range should be redesigned to span this cliff (e.g., nano/small/large instead of small/mid/large).
+**BER gap is tiny (~1pp) but BLER gap is real (~7-8pp TDLC)**. The BER metric averages over
+low-SNR bins where all models get BLER=1.0 regardless of capacity, masking the real signal.
+BLER captures the waterfall transition shift — larger models achieve the same BLER at lower SNR.
+
+Conclusion: capacity does matter, just not where BER looks. The MoE expert range should be
+widened (nano/small/large = block_dim 8/32/64) and evaluated on **BLER@high-SNR** rather
+than average BER. This is implemented in `2026-04-06-moe-nl-phase1-v1`.

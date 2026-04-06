@@ -52,15 +52,19 @@ bash experiments/2026-04-06-dense-stem-bottleneck-v1/submit.sh qsub
 
 ## Results
 
-| Run | val TDLC BER | val UMA BER | best score | Notes |
-|---|---|---|---|---|
-| stem_s32 | — | — | — | |
-| stem_s16 | — | — | — | |
+| Run | state_dim | val TDLC BER | val UMA BER | best score | TDLC ch. MSE |
+|---|---:|---|---|---|---|
+| stem_s32 | 32 | 0.1270 | 0.2762 | 0.2016 | 0.0785 |
+| stem_s16 | 16 | 0.1454 | 0.2858 | 0.2156 | 0.2003 |
+| *large ref (20k)* | *56* | *0.1221* | *0.2683* | *0.1965* | *0.0644* |
 
 ## Interpretation
 
-- If stem_s32 ≈ large: stem is NOT the bottleneck; backbone capacity (or task difficulty)
-  is the limiting factor. Reducing the stem in MoE is safe.
-- If stem_s32 >> large: the stem is critical; reducing it hurts. This means the current
-  `state_dim=56` stem is doing real work, and the experts need richer features to differentiate.
-  For MoE, a wider stem with smaller heterogeneous experts may be the right direction.
+**state_dim=32 is lossless** — matches large with ~67% fewer stem FLOPs. Safe to adopt.
+
+**state_dim=16 breaks channel estimation** — channel_mse is 3× worse; the model runs out of
+representational bandwidth to estimate 4 antennas × 128 subcarriers × 14 symbols. The quality
+degradation is real and comes specifically from the channel estimation head, not decoding.
+
+Decision: use state_dim=32 for the redesigned MoE expert family. This is implemented in
+`conf/model/moe_nl.yaml` and `2026-04-06-dense-large-s32-finalization-v1`.

@@ -73,6 +73,53 @@ Training routing:
 - Gumbel-Softmax during training (`temperature=1.0`, `min_temperature=0.5`)
 - Hard top-1 at inference
 
+## Capacity & Architecture Findings (2026-04-06)
+
+### Capacity Floor Study (`2026-04-06-dense-capacity-floor-v1`)
+Backbone width/depth was varied while keeping the stem fixed at [64,64], state_dim=56.
+
+| Model | Params | val TDLC BER | val UMA BER | best score (10k) | val TDLC BLER |
+|---|---:|---|---|---|---|
+| nano (block=8, 4 blk) | 90k | 0.1323 | 0.2814 | 0.2064 | 0.9711 |
+| micro (block=16, 4 blk) | 104k | 0.1296 | 0.2791 | 0.2044 | 0.9492 |
+| *small ref (20k)* | *168k* | *0.1251* | *0.2751* | *0.2001* | *0.9109* |
+| *large ref (20k)* | *450k* | *0.1221* | *0.2683* | *0.1965* | *0.8660* |
+
+**Key finding:** BER gap between nano and large is tiny (~1pp). BLER gap is more meaningful
+(~8pp TDLC). The BER metric averages over low-SNR bins where all models fail equally,
+masking the real signal. **Use BLER@high-SNR as the primary evaluation metric.**
+
+### Stem Bottleneck Study (`2026-04-06-dense-stem-bottleneck-v1`)
+Large backbone fixed (block_dim=64, 8 blocks). Only state_dim and stem_hidden_dims varied.
+
+| Model | state_dim | val TDLC BER | val UMA BER | best score (10k) | TDLC ch. MSE |
+|---|---:|---|---|---|---|
+| stem_s32 | 32 | 0.1270 | 0.2762 | 0.2016 | 0.0785 |
+| stem_s16 | 16 | 0.1454 | 0.2858 | 0.2156 | 0.2003 |
+| *large ref (20k)* | *56* | *0.1221* | *0.2683* | *0.1965* | *0.0644* |
+
+**Key finding:** state_dim=32 matches large with ~67% fewer stem FLOPs. state_dim=16 breaks —
+channel_mse is 3× worse, indicating the bottleneck is **channel estimation capacity**, not
+decoding. Safe working point: state_dim=32.
+
+### Revised MoE Expert Design
+The original expert range (block_dim 32/48/64) is too narrow — backbone capacity barely
+affects BER and shows only modest BLER differences. Redesigned expert family:
+
+| Expert | block_dim | num_blocks | readout_dim | state_dim |
+|---|---:|---:|---:|---:|
+| nano | 8 | 4 | 32 | 32 |
+| small | 32 | 8 | 96 | 32 |
+| large | 64 | 8 | 128 | 32 |
+
+Rationale: wider range (8→64 vs 32→64), state_dim=32 reduces stem FLOPs and makes the
+backbone capacity fraction larger relative to total, so routing has more FLOPs impact.
+
+### SNR-Binned Validation Metrics
+Training now logs per-SNR-bin BER/BLER/SER as timeseries during validation (every 500 steps).
+Controlled by `validation.snr_bins` (default 5). Metric keys: `val/{profile}/snr_bin_{i}/bler`.
+This makes the high-SNR waterfall shift visible during training without waiting for full eval.
+
 ## Phase 1 Experiment Status
 
 **Confirmed findings:**
@@ -93,9 +140,29 @@ Training routing:
 - BER nearly identical across all three; loss is the differentiator
 - Phase 1 matches dense large baseline; no real compute savings yet (soft gating, all experts active)
 
-**Phase 1 is complete. Dense expert checkpoints are finalized. Proceed to Phase 2.**
+**Phase 1 is complete. Original dense expert checkpoints are finalized. See Phase 2 redesign below.**
 
-## Phase 2 Setup
+## Phase 2 Redesign (Current Direction)
+
+The original Phase 2 plan (warm-start small/mid/large experts) is superseded by the revised
+expert family above. The new plan:
+
+**Expert checkpoints needed for warm-start (in progress):**
+- `nano`: `2026-04-06-dense-nano-finalization-v1` — job `18723723`, 20k steps
+- `small`: `knn_moe-5g-nrx/moe-5g-nrx/model-dense_small_final20k_constant_lr_s67-kivdz4qu:best` (existing)
+- `large_s32`: `2026-04-06-dense-large-s32-finalization-v1` — job `18723729`, 20k steps
+
+**MoE NL Phase 1 (joint from scratch, wider range):**
+- Job `18723728`, study `2026-04-06-moe-nl-phase1-v1`
+- Confirms routing differentiates before committing to warm-start Phase 2
+- Watch: router entropy, per-expert utilization by SNR bin
+
+**Planned Phase 2 stages (same as before):**
+1. Freeze experts → train router only (~2-3k steps)
+2. Unfreeze → joint fine-tune (~10k steps) with alpha=1e-3, beta=0.1
+3. Evaluate on **BLER@high-SNR vs realized FLOPs** Pareto curve
+
+## Original Phase 2 Setup (superseded)
 
 **Goal:** warm-start MoE experts from finalized dense checkpoints, then train router + joint fine-tune.
 

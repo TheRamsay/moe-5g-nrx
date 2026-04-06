@@ -125,9 +125,26 @@ Use the 16 GB class by default for dense training. The 12 GB / 11 GB classes ava
 
 ## Current Batches
 
-- `2026-03-29-dense-baseline-v1/` - canonical single-run dense baseline reference
-- `2026-03-29-dense-capacity-v1/` - dense baseline capacity sweep
-- `2026-04-04-dense-hparams-v1/` - optimizer sweep for the selected dense capacity
+### Dense Baselines
+- `2026-03-29-dense-baseline-v1/` — canonical single-run dense baseline reference
+- `2026-03-29-dense-capacity-v1/` — dense capacity sweep (small/mid/large, 10k steps)
+- `2026-04-04-dense-hparams-v1/` — optimizer sweep for selected dense capacity
+- `2026-04-05-dense-finalization-v1/` — large finalized to 20k; frozen canonical baseline
+- `2026-04-05-dense-small-mid-finalization-v1/` — small + mid finalized to 20k for MoE warm-start
+
+### Architecture Investigations
+- `2026-04-06-dense-capacity-floor-v1/` — **DONE** nano/micro vs small/large; BLER gap real, BER masks it
+- `2026-04-06-dense-stem-bottleneck-v1/` — **DONE** state_dim=32 lossless; state_dim=16 breaks channel estimation
+- `2026-04-06-dense-nano-depth-v1/` — **RUNNING** depth sensitivity at nano scale (2/8 blocks)
+
+### Redesigned Expert Family (nano/small/large, state_dim=32)
+- `2026-04-06-dense-nano-finalization-v1/` — **RUNNING** nano to 20k for MoE warm-start (job 18723723)
+- `2026-04-06-dense-large-s32-finalization-v1/` — **RUNNING** large state_dim=32 to 20k (job 18723729)
+
+### MoE Experiments
+- `2026-04-05-moe-joint-v0/` — first MoE architecture validation run
+- `2026-04-05-moe-alpha-sweep-v1/` — **DONE** alpha sweep; winner alpha=1e-3, beta=0.1
+- `2026-04-06-moe-nl-phase1-v1/` — **RUNNING** Phase 1 with wider nano/small/large range (job 18723728)
 
 ## Resource Presets
 
