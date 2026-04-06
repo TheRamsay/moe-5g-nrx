@@ -26,7 +26,7 @@ echo "Device: $RUNTIME_DEVICE"
 echo
 
 ENTRYPOINT="scripts/generate_datasets.py"
-RUN_ARGS="generation.num_samples=500000 generation.batch_size=64 generation.split=train generation.profiles=[uma,tdlc] generation.include_mixed=false generation.output_dir=$OUTPUT_DIR generation.log_to_wandb=false runtime.device=$RUNTIME_DEVICE"
+RUN_ARGS="generation.num_samples=500000 generation.batch_size=64 generation.split=train \"generation.profiles=[uma,tdlc]\" generation.include_mixed=false generation.output_dir=$OUTPUT_DIR generation.log_to_wandb=false runtime.device=$RUNTIME_DEVICE"
 
 case "$MODE" in
   print)
