@@ -17,7 +17,7 @@ cd "$REPO_ROOT"
 
 source experiments/resources/gpu-16gb.sh
 # Generation only — override to not waste a 46GB GPU slot
-SELECT_RESOURCES="select=1:ncpus=4:ngpus=1:mem=32gb:scratch_ssd=10gb:gpu_mem=16384mb"
+SELECT_RESOURCES="select=1:ncpus=4:ngpus=1:mem=64gb:scratch_ssd=10gb:gpu_mem=16384mb"
 
 echo "Study: generate-train-500k-v1"
 echo "Mode: $MODE"

@@ -75,10 +75,12 @@ def generate_dataset(
 
     dataloader = build_dataloader(cfg)
 
-    inputs_list: list[torch.Tensor] = []
-    bit_labels_list: list[torch.Tensor] = []
-    channel_target_list: list[torch.Tensor] = []
-    snr_db_list: list[torch.Tensor] = []
+    # Pre-allocate output tensors using first batch to determine shapes,
+    # avoiding large list accumulation + torch.cat (which needs 2× peak RAM).
+    inputs: torch.Tensor | None = None
+    bit_labels: torch.Tensor | None = None
+    channel_target: torch.Tensor | None = None
+    snr_db: torch.Tensor | None = None
 
     collected = 0
 
@@ -88,14 +90,24 @@ def generate_dataset(
             if batch_idx >= num_batches:
                 break
 
-            # Determine how many samples to take from this batch
             remaining = num_samples - collected
             take = min(batch_size, remaining)
 
-            inputs_list.append(batch.inputs[:take])
-            bit_labels_list.append(batch.bit_labels[:take])
-            channel_target_list.append(batch.channel_target[:take])
-            snr_db_list.append(batch.snr_db[:take])
+            b_inputs = batch.inputs[:take].cpu()
+            b_bit_labels = batch.bit_labels[:take].cpu()
+            b_channel_target = batch.channel_target[:take].cpu()
+            b_snr_db = batch.snr_db[:take].cpu()
+
+            if inputs is None:
+                inputs = torch.empty(num_samples, *b_inputs.shape[1:], dtype=b_inputs.dtype)
+                bit_labels = torch.empty(num_samples, *b_bit_labels.shape[1:], dtype=b_bit_labels.dtype)
+                channel_target = torch.empty(num_samples, *b_channel_target.shape[1:], dtype=b_channel_target.dtype)
+                snr_db = torch.empty(num_samples, *b_snr_db.shape[1:], dtype=b_snr_db.dtype)
+
+            inputs[collected : collected + take] = b_inputs
+            bit_labels[collected : collected + take] = b_bit_labels
+            channel_target[collected : collected + take] = b_channel_target
+            snr_db[collected : collected + take] = b_snr_db
 
             collected += take
             pbar.update(take)
@@ -103,11 +115,7 @@ def generate_dataset(
             if collected >= num_samples:
                 break
 
-    # Concatenate all batches
-    inputs = torch.cat(inputs_list, dim=0)
-    bit_labels = torch.cat(bit_labels_list, dim=0)
-    channel_target = torch.cat(channel_target_list, dim=0)
-    snr_db = torch.cat(snr_db_list, dim=0)
+    assert inputs is not None, "No batches were generated"
 
     # Build metadata
     simulator_config = {
