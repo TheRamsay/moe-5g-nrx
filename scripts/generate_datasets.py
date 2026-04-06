@@ -248,16 +248,18 @@ def _log_dataset_to_wandb(
 
 
 def _resolve_split(split: str) -> list[tuple[str, int]]:
-    from src.data.constants import TEST_SEED_OFFSET, VAL_SEED_OFFSET
+    from src.data.constants import TEST_SEED_OFFSET, TRAIN_DATASET_SEED_OFFSET, VAL_SEED_OFFSET
 
     split_normalized = split.lower()
+    if split_normalized == "train":
+        return [("train", TRAIN_DATASET_SEED_OFFSET)]
     if split_normalized == "val":
         return [("val", VAL_SEED_OFFSET)]
     if split_normalized == "test":
         return [("test", TEST_SEED_OFFSET)]
     if split_normalized == "both":
         return [("val", VAL_SEED_OFFSET), ("test", TEST_SEED_OFFSET)]
-    raise ValueError(f"Invalid split '{split}'. Expected one of: val, test, both")
+    raise ValueError(f"Invalid split '{split}'. Expected one of: train, val, test, both")
 
 
 @hydra.main(config_path="../conf", config_name="config", version_base=None)
