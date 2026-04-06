@@ -526,6 +526,12 @@ class Trainer:
         total_channel_mse = 0.0
         num_batches = 0
 
+        # Per-sample accumulators for SNR-binned metrics
+        all_snr: list[torch.Tensor] = []
+        all_ber: list[torch.Tensor] = []
+        all_bler: list[torch.Tensor] = []
+        all_ser: list[torch.Tensor] = []
+
         for batch in dataloader:
             batch: CachedNRXBatch
             features = batch.inputs.to(self.device)
@@ -546,25 +552,25 @@ class Trainer:
                 num_subcarriers=int(self.cfg.data.num_subcarriers),
                 num_ofdm_symbols=int(self.cfg.data.num_ofdm_symbols),
             )
-            bit_errors = error_metrics.bit_errors
 
-            total_bit_errors += int(bit_errors.sum().item())
+            total_bit_errors += int(error_metrics.bit_errors.sum().item())
             total_bits += int(targets.numel())
-
-            block_errors = error_metrics.block_errors
-            total_block_errors += int(block_errors.sum().item())
-            total_blocks += int(block_errors.numel())
-
-            symbol_errors = error_metrics.symbol_errors
-            total_symbol_errors += int(symbol_errors.sum().item())
-            total_symbols += int(symbol_errors.numel())
+            total_block_errors += int(error_metrics.block_errors.sum().item())
+            total_blocks += int(error_metrics.block_errors.numel())
+            total_symbol_errors += int(error_metrics.symbol_errors.sum().item())
+            total_symbols += int(error_metrics.symbol_errors.numel())
 
             channel_mse = self.channel_loss_fn(channel_estimate, channel_targets)
             total_channel_mse += float(channel_mse.item())
-
             num_batches += 1
 
-        return {
+            # Accumulate per-sample metrics for SNR binning
+            all_snr.append(batch.snr_db.cpu())
+            all_ber.append(error_metrics.bit_errors.float().mean(dim=1).cpu())
+            all_bler.append(error_metrics.block_errors.float().cpu())
+            all_ser.append(error_metrics.symbol_errors.float().mean(dim=(1, 2)).cpu())
+
+        metrics: dict[str, Any] = {
             "loss": total_loss / max(num_batches, 1),
             "ber": total_bit_errors / max(total_bits, 1),
             "bler": total_block_errors / max(total_blocks, 1),
@@ -572,6 +578,26 @@ class Trainer:
             "channel_mse": total_channel_mse / max(num_batches, 1),
             "num_samples": total_blocks,
         }
+
+        num_snr_bins = int(self.cfg.validation.get("snr_bins", 0))
+        if num_snr_bins > 0 and all_snr:
+            snr = torch.cat(all_snr)
+            ber = torch.cat(all_ber)
+            bler = torch.cat(all_bler)
+            ser = torch.cat(all_ser)
+            edges = torch.linspace(float(snr.min()), float(snr.max()), num_snr_bins + 1)
+            for i in range(num_snr_bins):
+                lo, hi = float(edges[i]), float(edges[i + 1])
+                mask = (snr >= lo) & (snr <= hi if i == num_snr_bins - 1 else snr < hi)
+                if not mask.any():
+                    continue
+                center = round((lo + hi) / 2.0, 1)
+                metrics[f"snr_bin_{i}/ber"] = float(ber[mask].mean())
+                metrics[f"snr_bin_{i}/bler"] = float(bler[mask].mean())
+                metrics[f"snr_bin_{i}/ser"] = float(ser[mask].mean())
+                metrics[f"snr_bin_{i}/snr_center"] = center
+
+        return metrics
 
     @torch.no_grad()
     def validate(self) -> dict[str, dict[str, Any]]:

@@ -53,6 +53,7 @@ validation:
     batch_size: 64
     every_n_steps: 500
     max_samples: null
+    snr_bins: 5
 
 evaluation:
     checkpoint: checkpoints/static_dense_nrx.pt

@@ -1,0 +1,26 @@
+# @package _global_
+# Experiment 11: Dense Nano finalized to 20k steps for MoE warm-start.
+# Matches the finalization recipe used for small/mid/large.
+
+defaults:
+  - override /model: static_dense
+  - override /dataset: mixed
+
+experiment:
+  batch_name: dense-nano-finalization-v1
+  exp_name: dense_nano_final20k_constant_lr_s67
+  tags: [baseline, dense, capacity, synthetic, simo-1x4, 16qam, capacity-floor]
+  notes: "Nano dense finalized to 20k steps for MoE Phase 2 warm-start. Same recipe as small/mid/large finalization."
+  study_slug: 2026-04-06-dense-nano-finalization-v1
+  study_path: experiments/2026-04-06-dense-nano-finalization-v1
+  question: finalize_nano_dense_20k_for_moe_warmstart
+
+model:
+  backbone:
+    stem_hidden_dims: [64, 64]
+    num_cnn_blocks: 4
+    block_hidden_dim: 8
+    readout_hidden_dim: 32
+
+training:
+  max_steps: 20000
