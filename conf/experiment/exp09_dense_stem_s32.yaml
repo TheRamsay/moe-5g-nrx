@@ -1,0 +1,29 @@
+# @package _global_
+# Experiment 09: Dense Stem Bottleneck - state_dim=32
+# Large backbone kept fixed; only stem width and state_dim are reduced.
+# Purpose: test whether the stem is doing the heavy lifting (if quality drops
+# with a smaller stem, the stem is the bottleneck, not backbone capacity).
+
+defaults:
+  - override /model: static_dense
+  - override /dataset: mixed
+
+experiment:
+  batch_name: dense-stem-bottleneck-v1
+  exp_name: dense_stem_s32_b8_h64_lr1e3_s67
+  tags: [baseline, dense, capacity, synthetic, simo-1x4, 16qam, stem-bottleneck]
+  notes: "Stem bottleneck study: state_dim=32, stem=[32,32]. Large backbone (block_hidden_dim=64) kept fixed to isolate stem."
+  study_slug: 2026-04-06-dense-stem-bottleneck-v1
+  study_path: experiments/2026-04-06-dense-stem-bottleneck-v1
+  question: Is the stem the bottleneck? Does reducing state_dim hurt quality significantly?
+
+model:
+  backbone:
+    stem_hidden_dims: [32, 32]
+    state_dim: 32
+    num_cnn_blocks: 8
+    block_hidden_dim: 64
+    readout_hidden_dim: 128
+
+training:
+  max_steps: 10000
