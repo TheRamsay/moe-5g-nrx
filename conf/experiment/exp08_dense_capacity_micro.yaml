@@ -1,0 +1,27 @@
+# @package _global_
+# Experiment 08: Dense Capacity Floor - Micro
+# Reduced backbone (block_hidden_dim=16, 4 blocks) with same stem as large.
+# Purpose: intermediate point between nano and existing small.
+
+defaults:
+  - override /model: static_dense
+  - override /dataset: mixed
+
+experiment:
+  batch_name: dense-capacity-floor-v1
+  exp_name: dense_micro_s56_b4_h16_lr1e3_s67
+  tags: [baseline, dense, capacity, synthetic, simo-1x4, 16qam, capacity-floor]
+  notes: "Micro dense: block_hidden_dim=16, 4 blocks, readout=64. Stem kept at [64,64] to isolate backbone capacity. Capacity floor study."
+  study_slug: 2026-04-06-dense-capacity-floor-v1
+  study_path: experiments/2026-04-06-dense-capacity-floor-v1
+  question: Is there a meaningful capacity floor below the existing small expert?
+
+model:
+  backbone:
+    stem_hidden_dims: [64, 64]
+    num_cnn_blocks: 4
+    block_hidden_dim: 16
+    readout_hidden_dim: 64
+
+training:
+  max_steps: 10000
