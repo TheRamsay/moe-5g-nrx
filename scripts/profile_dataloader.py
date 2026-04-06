@@ -47,7 +47,7 @@ def _make_sionna_cfg(profile: str = "tdlc"):
                 "channel_profile": profile,
                 "num_subcarriers": 128,
                 "num_ofdm_symbols": 14,
-                "modulation": "16qam",
+                "modulation": "qam16",
                 "snr_db": {"min": -10.0, "max": 20.0},
                 "delay_spread_s": 5.0e-7,
                 "min_speed_mps": 0.0,
