@@ -46,30 +46,33 @@
 
 ## Waiting On
 
-1. **CPU profiling (18730965)** — tells us if CPU Sionna + workers achieves meaningful GPU overlap
-   - If gen_cpu_w2 < ~150ms → worth wiring up (GPU util >50%)
-   - If gen_cpu_w2 > ~300ms → cached training data is the better fix
-2. **Training cache (18730966)** — 500k samples/profile to `~/moe-5g-datasets/train-500k-v1/train/`
-   - ~24 GB per profile, ~2-3 hours generation time
-   - Will need: hook up training to use cached data instead of on-the-fly Sionna
+1. **Training cache (18730966)** — 500k samples/profile to `~/moe-5g-datasets/train-500k-v1/train/`
+   - ~24 GB per profile, running since ~13:00, expected ~2-3 hours total
+   - Once done: wire up `cached` training mode (point dataloader at .pt files)
+
+---
+
+## Resolved Today
+
+- **CPU Sionna profiling (18730965) → done.** CPU gen = 699ms (workers=0) / 546ms (workers=2).
+  CPU Sionna is *slower* than GPU Sionna (483ms). GPU util with CPU+workers=2 ≈ 13% — same as
+  current setup. **CPU overlap is not worth pursuing. Cached data is the right fix.**
 
 ---
 
 ## Immediate Next Steps
 
-1. Check CPU profiling results → decide on GPU utilization fix strategy
-2. Once training cache is ready → add `cached` training mode (point dataloader at .pt files)
-3. **Set up Phase 2 warm-start experiment:**
+1. Wait for training cache (18730966) → wire up `cached` training mode
+2. **Set up Phase 2 warm-start experiment:**
    - Stage 1: freeze experts, train router ~2-3k steps
    - Stage 2: unfreeze, joint fine-tune ~10k steps (alpha=1e-3, beta=0.1)
    - Evaluate: BLER@high-SNR vs realized FLOPs Pareto curve
-4. Update AGENTS.md with Phase 2 experiment artifacts once done
+3. Update AGENTS.md with Phase 2 experiment artifacts once done
 
 ---
 
 ## Open Questions
 
-- CPU Sionna speed: fast enough to overlap with GPU training, or not?
 - Should training use cached data exclusively, or hybrid (cached + on-the-fly refresh)?
 - Is 500k samples enough diversity for 20k training steps (1.28M samples → ~2.5 cycles)?
 - Phase 2: does warm-start actually improve over joint-from-scratch (MoE NL Phase 1)?

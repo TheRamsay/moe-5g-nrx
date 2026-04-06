@@ -239,11 +239,21 @@ MEAN is the closest prior work. Key differences:
 On-the-fly Sionna generation is the training bottleneck — 6.9x slower than the GPU training
 step on an A40 (483ms gen vs 70ms step). GPU sits idle ~87% of the time.
 
-**Fix in progress:** 500k-sample cached training dataset being generated at
-`~/moe-5g-datasets/train-500k-v1/train/{uma,tdlc}.pt` (job 18730966).
-CPU-pinned Sionna profiling pending (job 18730965) to determine if CPU gen + workers
-can achieve meaningful GPU overlap as a cheaper alternative.
+**CPU Sionna profiling results (job 18730965, finished):**
 
+| Mode | Batch time | vs GPU step (70ms) |
+|---|---:|---:|
+| Sionna GPU (workers=0) | 483 ms | 6.9× |
+| Sionna CPU (workers=0) | 699 ms | 10.0× |
+| Sionna CPU (workers=2) | 546 ms | 7.8× |
+
+**Conclusion: CPU Sionna does not help.** CPU gen is slower than GPU gen (699ms vs 483ms).
+Even with workers=2, estimated GPU util ≈ 13% — same as today's on-the-fly setup (~15%).
+The gen/step ratio (~8-10×) is simply too large for overlap to matter.
+
+**Fix: cached training data.** 500k-sample dataset being generated at
+`~/moe-5g-datasets/train-500k-v1/train/{uma,tdlc}.pt` (job 18730966, running).
+This eliminates Sionna from the training loop entirely.
 Storage: ~48 KB/sample → 500k samples ≈ 24 GB per profile.
 
 ## Key Rules For Future Work
