@@ -77,6 +77,12 @@ def _chunk_worker(args_json: str) -> None:
         if p not in sys.path:
             sys.path.insert(0, p)
 
+    # Force CPU-only TF BEFORE any TF/Sionna import so the GPU device is
+    # never claimed. This must happen before the first 'import tensorflow'.
+    import os
+
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
     import torch
     from hydra import initialize_config_dir
     from omegaconf import open_dict
@@ -103,10 +109,11 @@ def _chunk_worker(args_json: str) -> None:
 
         dataloader = build_dataloader(cfg)
 
-        inputs_list: list[torch.Tensor] = []
-        bit_labels_list: list[torch.Tensor] = []
-        channel_target_list: list[torch.Tensor] = []
-        snr_db_list: list[torch.Tensor] = []
+        # Pre-allocate to avoid 2× peak RAM from torch.cat.
+        inputs: torch.Tensor | None = None
+        bit_labels: torch.Tensor | None = None
+        channel_target: torch.Tensor | None = None
+        snr_db: torch.Tensor | None = None
         collected = 0
 
         for batch_idx, batch in enumerate(dataloader):
@@ -114,20 +121,34 @@ def _chunk_worker(args_json: str) -> None:
                 break
             remaining = chunk_size - collected
             take = min(batch_size, remaining)
-            inputs_list.append(batch.inputs[:take].cpu())
-            bit_labels_list.append(batch.bit_labels[:take].cpu())
-            channel_target_list.append(batch.channel_target[:take].cpu())
-            snr_db_list.append(batch.snr_db[:take].cpu())
+
+            b_inp = batch.inputs[:take].cpu()
+            b_bit = batch.bit_labels[:take].cpu()
+            b_ch = batch.channel_target[:take].cpu()
+            b_snr = batch.snr_db[:take].cpu()
+
+            if inputs is None:
+                inputs = torch.empty(chunk_size, *b_inp.shape[1:], dtype=b_inp.dtype)
+                bit_labels = torch.empty(chunk_size, *b_bit.shape[1:], dtype=b_bit.dtype)
+                channel_target = torch.empty(chunk_size, *b_ch.shape[1:], dtype=b_ch.dtype)
+                snr_db = torch.empty(chunk_size, *b_snr.shape[1:], dtype=b_snr.dtype)
+
+            inputs[collected : collected + take] = b_inp
+            bit_labels[collected : collected + take] = b_bit
+            channel_target[collected : collected + take] = b_ch
+            snr_db[collected : collected + take] = b_snr
+
             collected += take
             if collected >= chunk_size:
                 break
 
+    assert inputs is not None
     torch.save(
         {
-            "inputs": torch.cat(inputs_list, dim=0),
-            "bit_labels": torch.cat(bit_labels_list, dim=0),
-            "channel_target": torch.cat(channel_target_list, dim=0),
-            "snr_db": torch.cat(snr_db_list, dim=0),
+            "inputs": inputs,
+            "bit_labels": bit_labels,
+            "channel_target": channel_target,
+            "snr_db": snr_db,
         },
         output_path,
     )
