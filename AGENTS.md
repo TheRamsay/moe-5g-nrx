@@ -251,10 +251,19 @@ step on an A40 (483ms gen vs 70ms step). GPU sits idle ~87% of the time.
 Even with workers=2, estimated GPU util ≈ 13% — same as today's on-the-fly setup (~15%).
 The gen/step ratio (~8-10×) is simply too large for overlap to matter.
 
-**Fix: cached training data.** 500k-sample dataset being generated at
-`~/moe-5g-datasets/train-500k-v1/train/{uma,tdlc}.pt` (job 18730966, running).
+**Fix: cached training data.** 500k-sample dataset targeted at
+`~/moe-5g-datasets/train-500k-v1/train/{uma,tdlc}.pt`.
 This eliminates Sionna from the training loop entirely.
 Storage: ~48 KB/sample → 500k samples ≈ 24 GB per profile.
+
+**Generation is blocked — see `PROBLEM.md` for full crash history.**
+Five PBS jobs have failed. Root causes resolved so far:
+- TF session memory leak across batches → fixed by subprocess-isolated 100k chunks
+- PyTorch allocator retains freed shard pages in glibc heap → fix: `malloc_trim(0)` after each shard
+- Child TF GPU init overhead → fixed by `CUDA_VISIBLE_DEVICES=""` in worker (CPU-only TF)
+
+Proposed fix (`malloc_trim`) is coded in `scripts/generate_datasets.py` but not yet submitted.
+Expected peak RAM with fix: ~50 GB (parent 25 GB + child TF CPU 25 GB) — safe under 64 GB.
 
 ## Key Rules For Future Work
 

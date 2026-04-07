@@ -1,78 +1,40 @@
-# Current Work — 2026-04-06
+# Current Work — 2026-04-07
 
 ## What We Learned Today
 
-### Waterfall BLER comparison (waterfall-compare-v1)
-- Fine-grained 2 dB SNR sweep: nano/small/large_s32/large_s56 on val data
-- **TDLC SNR=17: nano BLER=0.722, large_s56 BLER=0.284 → 44pp gap**
-- Average BER/BLER was masking this — all the signal is in the waterfall region
-- UMA waterfall is weak (5-8pp gaps), UMA curve barely drops even at SNR=24
-- **Expert size matters. MoE direction is justified.**
+### Training cache generation is blocked by memory issues
+Five PBS jobs have failed attempting to generate 500k training samples per profile.
+See `PROBLEM.md` for the full crash history. TL;DR:
 
-### state_dim decision: stay at s56
-- state_dim=32 was supposed to save stem FLOPs and increase routing leverage
-- But stem is SHARED in MoE — state_dim doesn't affect per-expert FLOPs differentiation
-- Routing savings: s56=80% vs s32=82% — difference is 2pp, negligible
-- Cost of s32: 15pp worse BLER at SNR=17 (large_s32=0.436 vs large_s56=0.284)
-- **Verdict: use state_dim=56 throughout. The s32 checkpoints are reference-only.**
+1. **TF session memory leak** — single TF session for 500k samples stalls mid-run (fixed by subprocess chunking)
+2. **PyTorch allocator doesn't return freed pages to OS** — parent RSS grows by ~4.8 GB per completed chunk even after `del shard; gc.collect()`. By chunk 3, parent (~34 GB) + child TF CPU (~25 GB) > 64 GB cgroup limit → OOM.
 
-### Phase 2 warm-start checkpoints: all ready
-- nano (s56, 20k): `model-dense_nano_final20k_constant_lr_s67-aos4hhid:best` ✓
-- small (s56, 20k): `model-dense_small_final20k_constant_lr_s67-kivdz4qu:best` ✓
-- large (s56, 20k): `model-dense_large_final20k_constant_lr_s67-55l1dpby:best` ✓
-- All three use state_dim=56. Phase 2 can start immediately.
+**Proposed fix (coded, not yet submitted):** call `ctypes.CDLL("libc.so.6").malloc_trim(0)` after each shard deletion in the parent. Forces glibc to return freed heap pages to the OS, keeping parent RSS stable at ~25 GB. Expected peak: ~50 GB → safe under 64 GB limit.
 
-### Nano depth: doesn't matter
-- 2 blk / 4 blk / 8 blk at nano scale → all within noise
-- Keep 4 blocks for nano expert
-
-### GPU utilization: Sionna is the bottleneck
-- Profiled on A40: GPU training step = 70ms, Sionna gen (GPU, workers=0) = 483ms
-- GPU is idle ~87% of training time
-- GPU workers=2 helps somewhat (308ms) but Sionna fights PyTorch for GPU memory (OOM)
-- `set_visible_devices` can't be called after TF init → CPU mode needs --force-cpu flag at startup
-- CPU profiling results pending (job 18730965)
+**Current code state:** fix is in `scripts/generate_datasets.py` (malloc_trim + subprocess isolation + CPU-only TF). Job not yet resubmitted.
 
 ---
 
-## Currently Running Jobs (MetaCentrum)
+## Currently Running Jobs
 
-| Job ID | Name | Purpose |
-|---|---|---|
-| `18730965` | profile_dataloader --force-cpu | Measure CPU Sionna gen speed to estimate GPU overlap |
-| `18730966` | generate-train-500k-v1 | 500k cached training samples per profile |
-
----
-
-## Waiting On
-
-1. **Training cache (18730966)** — 500k samples/profile to `~/moe-5g-datasets/train-500k-v1/train/`
-   - ~24 GB per profile, running since ~13:00, expected ~2-3 hours total
-   - Once done: wire up `cached` training mode (point dataloader at .pt files)
-
----
-
-## Resolved Today
-
-- **CPU Sionna profiling (18730965) → done.** CPU gen = 699ms (workers=0) / 546ms (workers=2).
-  CPU Sionna is *slower* than GPU Sionna (483ms). GPU util with CPU+workers=2 ≈ 13% — same as
-  current setup. **CPU overlap is not worth pursuing. Cached data is the right fix.**
+None.
 
 ---
 
 ## Immediate Next Steps
 
-1. Wait for training cache (18730966) → wire up `cached` training mode
-2. **Set up Phase 2 warm-start experiment:**
+1. **Resubmit training cache generation** with malloc_trim fix
+2. Wire up `cached` training mode once `train-500k-v1` is available
+3. **Set up Phase 2 warm-start experiment:**
    - Stage 1: freeze experts, train router ~2-3k steps
    - Stage 2: unfreeze, joint fine-tune ~10k steps (alpha=1e-3, beta=0.1)
    - Evaluate: BLER@high-SNR vs realized FLOPs Pareto curve
-3. Update AGENTS.md with Phase 2 experiment artifacts once done
 
 ---
 
 ## Open Questions
 
+- Does malloc_trim fully solve the RSS accumulation, or do we need 96/128 GB?
 - Should training use cached data exclusively, or hybrid (cached + on-the-fly refresh)?
-- Is 500k samples enough diversity for 20k training steps (1.28M samples → ~2.5 cycles)?
-- Phase 2: does warm-start actually improve over joint-from-scratch (MoE NL Phase 1)?
+- Is 500k samples enough diversity for 20k training steps (~2.5 epochs)?
+- Phase 2: does warm-start actually improve over joint-from-scratch (Phase 1)?
