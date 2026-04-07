@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import gc
+import json
+import multiprocessing as mp
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -13,8 +16,7 @@ import hydra
 import numpy as np
 import torch
 from hydra import compose
-from omegaconf import DictConfig, open_dict
-from tqdm import tqdm
+from omegaconf import DictConfig
 
 import wandb
 
@@ -42,7 +44,93 @@ def build_config(profile: str, batch_size: int, seed: int) -> DictConfig:
     return cfg
 
 
-_CHUNK_SIZE = 100_000  # Restart TF/Sionna session every N samples to prevent memory leak
+# ---------------------------------------------------------------------------
+# Subprocess-isolated chunk generation
+# Each chunk runs in a fresh Python process (spawn) so TF memory is fully
+# released by the OS when the child exits. This prevents the TF allocator
+# from accumulating RAM across chunks, which otherwise stalls generation.
+# ---------------------------------------------------------------------------
+
+_CHUNK_SIZE = 100_000
+_CONFIG_DIR = str(PROJECT_ROOT / "conf")
+
+
+def _chunk_worker(args_json: str) -> None:
+    """Entry point for a spawned subprocess that generates one chunk.
+
+    Fully self-contained: initializes Hydra, builds dataloader, generates
+    samples, and saves them to a temp shard file. Called via multiprocessing
+    with the 'spawn' start method so TF starts fresh in every child.
+    """
+    args = json.loads(args_json)
+    profile: str = args["profile"]
+    chunk_size: int = args["chunk_size"]
+    batch_size: int = args["batch_size"]
+    seed: int = args["seed"]
+    output_path: str = args["output_path"]
+    config_dir: str = args["config_dir"]
+    project_root: str = args["project_root"]
+    src_root: str = args["src_root"]
+
+    # Re-add project paths (subprocess doesn't inherit sys.path changes).
+    for p in [src_root, project_root]:
+        if p not in sys.path:
+            sys.path.insert(0, p)
+
+    import torch
+    from hydra import initialize_config_dir
+    from omegaconf import open_dict
+
+    with initialize_config_dir(config_dir=config_dir, version_base=None):
+        from hydra import compose as hcompose
+
+        num_batches = (chunk_size + batch_size - 1) // batch_size
+        cfg = hcompose(
+            config_name="config",
+            overrides=[
+                f"dataset={profile}",
+                f"training.batch_size={batch_size}",
+                f"runtime.seed={seed}",
+                "dataset.diagnostics.sample_preview=false",
+            ],
+        )
+        with open_dict(cfg):
+            cfg.data.num_subcarriers = int(cfg.dataset.num_subcarriers)
+            cfg.data.num_ofdm_symbols = int(cfg.dataset.num_ofdm_symbols)
+            cfg.dataset.max_batches_per_epoch = num_batches
+
+        from src.data import build_dataloader
+
+        dataloader = build_dataloader(cfg)
+
+        inputs_list: list[torch.Tensor] = []
+        bit_labels_list: list[torch.Tensor] = []
+        channel_target_list: list[torch.Tensor] = []
+        snr_db_list: list[torch.Tensor] = []
+        collected = 0
+
+        for batch_idx, batch in enumerate(dataloader):
+            if batch_idx >= num_batches:
+                break
+            remaining = chunk_size - collected
+            take = min(batch_size, remaining)
+            inputs_list.append(batch.inputs[:take].cpu())
+            bit_labels_list.append(batch.bit_labels[:take].cpu())
+            channel_target_list.append(batch.channel_target[:take].cpu())
+            snr_db_list.append(batch.snr_db[:take].cpu())
+            collected += take
+            if collected >= chunk_size:
+                break
+
+    torch.save(
+        {
+            "inputs": torch.cat(inputs_list, dim=0),
+            "bit_labels": torch.cat(bit_labels_list, dim=0),
+            "channel_target": torch.cat(channel_target_list, dim=0),
+            "snr_db": torch.cat(snr_db_list, dim=0),
+        },
+        output_path,
+    )
 
 
 def generate_dataset(
@@ -54,9 +142,10 @@ def generate_dataset(
 ) -> dict[str, Any]:
     """Generate a dataset for a single channel profile.
 
-    Internally splits generation into chunks of _CHUNK_SIZE, rebuilding the
-    Sionna/TF dataloader each chunk to prevent TF session memory leaks that
-    cause generation to stall on large datasets.
+    Internally splits generation into _CHUNK_SIZE-sample chunks, each run in
+    an isolated subprocess (spawn). This ensures TF/Sionna memory is fully
+    reclaimed by the OS after each chunk, preventing the accumulation that
+    stalls generation on large datasets.
 
     Args:
         profile: Channel profile name (awgn, uma, tdlc).
@@ -68,78 +157,69 @@ def generate_dataset(
     Returns:
         Dictionary with tensors and metadata ready for saving.
     """
-    from src.data import build_dataloader
-
     chunks_needed = (num_samples + _CHUNK_SIZE - 1) // _CHUNK_SIZE
     progress_desc = desc or f"Generating {profile}"
+    ctx = mp.get_context("spawn")
 
-    # Pre-allocate output tensors; shapes determined from first batch.
+    # Pre-allocate output tensors; shapes determined from first shard.
     inputs: torch.Tensor | None = None
     bit_labels: torch.Tensor | None = None
     channel_target: torch.Tensor | None = None
     snr_db: torch.Tensor | None = None
-    meta_cfg = None
 
     total_collected = 0
 
-    for chunk_idx in range(chunks_needed):
-        chunk_size = min(_CHUNK_SIZE, num_samples - total_collected)
-        chunk_seed = seed + chunk_idx  # vary seed so chunks aren't identical
-        num_batches = (chunk_size + batch_size - 1) // batch_size
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        for chunk_idx in range(chunks_needed):
+            chunk_size = min(_CHUNK_SIZE, num_samples - total_collected)
+            chunk_seed = seed + chunk_idx
+            shard_path = str(Path(tmp_dir) / f"shard_{chunk_idx:04d}.pt")
+            chunk_label = f" [chunk {chunk_idx + 1}/{chunks_needed}]" if chunks_needed > 1 else ""
+            print(f"  {progress_desc}{chunk_label}: generating {chunk_size} samples (seed={chunk_seed})", flush=True)
 
-        cfg = build_config(profile, batch_size, chunk_seed)
-        with open_dict(cfg):
-            cfg.data.num_subcarriers = int(cfg.dataset.num_subcarriers)
-            cfg.data.num_ofdm_symbols = int(cfg.dataset.num_ofdm_symbols)
-            cfg.dataset.max_batches_per_epoch = int(num_batches)
+            args_json = json.dumps(
+                {
+                    "profile": profile,
+                    "chunk_size": chunk_size,
+                    "batch_size": batch_size,
+                    "seed": chunk_seed,
+                    "output_path": shard_path,
+                    "config_dir": _CONFIG_DIR,
+                    "project_root": str(PROJECT_ROOT),
+                    "src_root": str(SRC_ROOT),
+                }
+            )
 
-        if meta_cfg is None:
-            meta_cfg = cfg  # save for metadata (profile/modulation/snr range)
+            proc = ctx.Process(target=_chunk_worker, args=(args_json,))
+            proc.start()
+            proc.join()
+            if proc.exitcode != 0:
+                raise RuntimeError(f"Chunk {chunk_idx} worker exited with code {proc.exitcode}")
 
-        dataloader = build_dataloader(cfg)
-        chunk_collected = 0
-        chunk_label = f" [chunk {chunk_idx + 1}/{chunks_needed}]" if chunks_needed > 1 else ""
+            shard: dict[str, torch.Tensor] = torch.load(shard_path)
+            n = shard["inputs"].shape[0]
 
-        with tqdm(total=chunk_size, desc=progress_desc + chunk_label, unit="samples") as pbar:
-            for batch_idx, batch in enumerate(dataloader):
-                if batch_idx >= num_batches:
-                    break
+            if inputs is None:
+                inputs = torch.empty(num_samples, *shard["inputs"].shape[1:], dtype=shard["inputs"].dtype)
+                bit_labels = torch.empty(num_samples, *shard["bit_labels"].shape[1:], dtype=shard["bit_labels"].dtype)
+                channel_target = torch.empty(
+                    num_samples, *shard["channel_target"].shape[1:], dtype=shard["channel_target"].dtype
+                )
+                snr_db = torch.empty(num_samples, *shard["snr_db"].shape[1:], dtype=shard["snr_db"].dtype)
 
-                remaining = chunk_size - chunk_collected
-                take = min(batch_size, remaining)
+            inputs[total_collected : total_collected + n] = shard["inputs"]
+            bit_labels[total_collected : total_collected + n] = shard["bit_labels"]
+            channel_target[total_collected : total_collected + n] = shard["channel_target"]
+            snr_db[total_collected : total_collected + n] = shard["snr_db"]
 
-                b_inputs = batch.inputs[:take].cpu()
-                b_bit_labels = batch.bit_labels[:take].cpu()
-                b_channel_target = batch.channel_target[:take].cpu()
-                b_snr_db = batch.snr_db[:take].cpu()
-
-                if inputs is None:
-                    inputs = torch.empty(num_samples, *b_inputs.shape[1:], dtype=b_inputs.dtype)
-                    bit_labels = torch.empty(num_samples, *b_bit_labels.shape[1:], dtype=b_bit_labels.dtype)
-                    channel_target = torch.empty(num_samples, *b_channel_target.shape[1:], dtype=b_channel_target.dtype)
-                    snr_db = torch.empty(num_samples, *b_snr_db.shape[1:], dtype=b_snr_db.dtype)
-
-                pos = total_collected + chunk_collected
-                inputs[pos : pos + take] = b_inputs
-                bit_labels[pos : pos + take] = b_bit_labels
-                channel_target[pos : pos + take] = b_channel_target
-                snr_db[pos : pos + take] = b_snr_db
-
-                chunk_collected += take
-                pbar.update(take)
-
-                if chunk_collected >= chunk_size:
-                    break
-
-        del dataloader
-        gc.collect()
-        total_collected += chunk_collected
+            del shard
+            gc.collect()
+            total_collected += n
 
     assert inputs is not None, "No batches were generated"
-    assert meta_cfg is not None
 
-    # Build metadata using config from first chunk (profile/modulation/SNR range don't vary)
-    cfg = meta_cfg
+    # Build metadata via the parent's already-initialized Hydra context.
+    cfg = build_config(profile, batch_size, seed)
     simulator_config = {
         "num_subcarriers": int(cfg.dataset.num_subcarriers),
         "num_ofdm_symbols": int(cfg.dataset.num_ofdm_symbols),
