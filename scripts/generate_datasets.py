@@ -235,6 +235,16 @@ def generate_dataset(
 
             del shard
             gc.collect()
+            # Force glibc to return freed pages to the OS. PyTorch's CPU
+            # allocator keeps freed chunks in its heap otherwise, causing
+            # parent RSS to grow by ~chunk_size after every shard load even
+            # though the tensors are gone. Without this, chunk 3+ OOMs.
+            try:
+                import ctypes
+
+                ctypes.CDLL("libc.so.6").malloc_trim(ctypes.c_size_t(0))
+            except Exception:
+                pass  # non-Linux or libc not found — best effort
             total_collected += n
 
     assert inputs is not None, "No batches were generated"

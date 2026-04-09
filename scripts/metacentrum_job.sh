@@ -138,6 +138,7 @@ JOB_RESULT_DIR="$RESULTS_ROOT/$JOB_LABEL"
 
 export TMPDIR="$SCRATCHDIR/tmp"
 export XDG_CACHE_HOME="$SCRATCHDIR/.cache"
+export HF_HOME="${HF_HOME:-$SUBMIT_HOME/.cache/huggingface}"
 export MPLCONFIGDIR="$SCRATCHDIR/.config/matplotlib"
 export WANDB_DIR="$ARTIFACT_DIR/wandb"
 export WANDB_CACHE_DIR="$SCRATCHDIR/.cache/wandb"

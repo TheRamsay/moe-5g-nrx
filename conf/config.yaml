@@ -24,6 +24,7 @@ data:
     bits_per_symbol: 4
 
 training:
+    hf_dataset: null        # e.g. "Vack0/moe-5g-nrx" — use HuggingFace dataset instead of on-the-fly Sionna
     batch_size: 32
     learning_rate: 0.001
     weight_decay: 0.0001
@@ -49,6 +50,8 @@ validation:
     enabled: true
     dataset_path: null
     data_dir: data/val
+    hf_dataset: null      # e.g. "Vack0/moe-5g-nrx" — loads from HuggingFace instead of .pt files
+    hf_split: val
     profiles: [uma, tdlc]
     batch_size: 64
     every_n_steps: 500

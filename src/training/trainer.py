@@ -468,31 +468,44 @@ class Trainer:
             return
 
         validation_cfg = self.cfg.validation
-        dataset_specs: list[tuple[str, Path]] = []
-
-        profiles = validation_cfg.get("profiles")
-        if profiles:
-            data_dir = Path(str(validation_cfg.get("data_dir", "data/val")))
-            dataset_specs.extend((str(profile), data_dir / f"{profile}.pt") for profile in profiles)
-        elif validation_cfg.get("dataset_path"):
-            val_path = Path(str(validation_cfg.dataset_path))
-            dataset_specs.append((val_path.stem, val_path))
-
         max_samples = validation_cfg.get("max_samples")
-        for name, path in dataset_specs:
-            if not path.exists():
-                print(f"[WARNING] Validation dataset not found: {path}")
-                continue
+        batch_size = int(validation_cfg.batch_size)
+        loader_kwargs = dict(
+            batch_size=batch_size,
+            max_samples=int(max_samples) if max_samples else None,
+            num_workers=0,
+            pin_memory=False,
+            shuffle=False,
+        )
 
-            self._val_dataloaders[name] = build_cached_dataloader(
-                path=path,
-                batch_size=int(validation_cfg.batch_size),
-                max_samples=int(max_samples) if max_samples else None,
-                num_workers=0,
-                pin_memory=False,
-                shuffle=False,
-            )
-            print(f"[INFO] Validation dataset loaded: {path}")
+        hf_dataset = validation_cfg.get("hf_dataset")
+        profiles = validation_cfg.get("profiles")
+
+        if hf_dataset:
+            hf_split = str(validation_cfg.get("hf_split", "val"))
+            for profile in profiles or []:
+                self._val_dataloaders[str(profile)] = build_cached_dataloader(
+                    hf_repo=str(hf_dataset),
+                    hf_config=str(profile),
+                    hf_split=hf_split,
+                    **loader_kwargs,
+                )
+                print(f"[INFO] Validation dataset loaded: {hf_dataset}/{profile} (split={hf_split})")
+        else:
+            dataset_specs: list[tuple[str, Path]] = []
+            if profiles:
+                data_dir = Path(str(validation_cfg.get("data_dir", "data/val")))
+                dataset_specs.extend((str(profile), data_dir / f"{profile}.pt") for profile in profiles)
+            elif validation_cfg.get("dataset_path"):
+                val_path = Path(str(validation_cfg.dataset_path))
+                dataset_specs.append((val_path.stem, val_path))
+
+            for name, path in dataset_specs:
+                if not path.exists():
+                    print(f"[WARNING] Validation dataset not found: {path}")
+                    continue
+                self._val_dataloaders[name] = build_cached_dataloader(path=path, **loader_kwargs)
+                print(f"[INFO] Validation dataset loaded: {path}")
 
         if not self._val_dataloaders:
             print("  Run: python scripts/generate_datasets.py generation.split=val")

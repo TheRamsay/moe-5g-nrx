@@ -2,6 +2,7 @@ from .cached_dataset import (
     CachedNRXBatch,
     CachedNRXDataset,
     CachedNRXSample,
+    HuggingFaceNRXDataset,
     build_cached_dataloader,
     collate_cached_batch,
 )
@@ -15,6 +16,7 @@ __all__ = [
     "CachedNRXSample",
     "ChannelProfile",
     "GENERATABLE_PROFILES",
+    "HuggingFaceNRXDataset",
     "MixedNRXIterableDataset",
     "NRXBatch",
     "SionnaNRXSimulator",

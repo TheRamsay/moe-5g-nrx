@@ -10,7 +10,7 @@ import torch
 from omegaconf import DictConfig, open_dict
 from torch.utils.data import DataLoader
 
-from src.data import build_dataloader
+from src.data import HuggingFaceNRXDataset, build_dataloader, collate_cached_batch
 from src.training import Trainer
 
 os.environ["TF_USE_LEGACY_KERAS"] = "1"
@@ -24,19 +24,72 @@ def _set_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
-def _build_train_loader(cfg: DictConfig) -> DataLoader:
+class _AlternatingLoader:
+    """Alternates batches between per-profile DataLoaders (matches MixedNRXIterableDataset)."""
+
+    def __init__(self, loaders: dict[str, DataLoader]):
+        self.loaders = loaders
+        self.profiles = list(loaders.keys())
+
+    def __iter__(self):
+        iters = {p: iter(dl) for p, dl in self.loaders.items()}
+        idx = 0
+        while True:
+            profile = self.profiles[idx % len(self.profiles)]
+            try:
+                yield next(iters[profile])
+            except StopIteration:
+                iters[profile] = iter(self.loaders[profile])
+                yield next(iters[profile])
+            idx += 1
+
+
+def _build_hf_train_loader(cfg: DictConfig, hf_repo: str):
+    """Build a training loader backed by a HuggingFace dataset."""
+    channel_profile = str(cfg.dataset.channel_profile).lower()
+    batch_size = int(cfg.training.batch_size)
+
+    if channel_profile == "mixed":
+        profiles = list(cfg.dataset.mixed.get("profiles", ["uma", "tdlc"]))
+    else:
+        profiles = [channel_profile]
+
+    loaders = {}
+    for profile in profiles:
+        ds = HuggingFaceNRXDataset(hf_repo, profile, "train")
+        print(f"[INFO] HF training dataset: {hf_repo}/{profile}/train ({len(ds)} samples)")
+        loaders[profile] = DataLoader(
+            ds,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=2,
+            pin_memory=True,
+            collate_fn=collate_cached_batch,
+            drop_last=True,
+        )
+
+    if len(loaders) == 1:
+        return next(iter(loaders.values()))
+    return _AlternatingLoader(loaders)
+
+
+def _build_train_loader(cfg: DictConfig):
     # Keep model/data geometry synchronized with generator dataset config.
     with open_dict(cfg):
         cfg.data.num_subcarriers = int(cfg.dataset.num_subcarriers)
         cfg.data.num_ofdm_symbols = int(cfg.dataset.num_ofdm_symbols)
 
+    hf_dataset = cfg.training.get("hf_dataset")
+    if hf_dataset:
+        return _build_hf_train_loader(cfg, str(hf_dataset))
+
     return build_dataloader(cfg)
 
 
 class _TrainingBatchAdapter:
-    """Convert generator NRXBatch into trainer tuple contract."""
+    """Convert NRXBatch/CachedNRXBatch into trainer tuple contract."""
 
-    def __init__(self, dataloader: DataLoader):
+    def __init__(self, dataloader):
         self._dataloader = dataloader
 
     def __iter__(self):
