@@ -260,10 +260,11 @@ cache.
   `best_score=0.1998`. Matches the Sionna baseline to within normal noise.
 
 **Activating HF training:** set `training.hf_dataset=Vack0/moe-5g-nrx` in the
-config. `main.py` builds `HuggingFaceNRXDataset` (lazy Arrow, memory-mapped),
-and for mixed training interleaves two per-profile DataLoaders via
-`_AlternatingLoader`. `_TrainingBatchAdapter` works on both `NRXBatch` (Sionna)
-and `CachedNRXBatch` (HF/.pt) since they share the same attribute names.
+config. `main.py` builds a batch-native HF training loader and for mixed
+training interleaves two per-profile DataLoaders via `_AlternatingLoader`.
+The hot training path no longer materializes one Python sample at a time before
+collation. `_TrainingBatchAdapter` works on both `NRXBatch` (Sionna) and
+`CachedNRXBatch` (HF/.pt) since they share the same attribute names.
 
 **Cache location — important.** MetaCentrum pre-sets `HF_HUB_CACHE` and
 `HF_DATASETS_CACHE` to `$SCRATCHDIR` as part of the job environment. Without

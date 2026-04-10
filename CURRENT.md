@@ -35,6 +35,9 @@ the cache and start training without re-downloading.
 - `main.py`: `_build_hf_train_loader` with `_AlternatingLoader` for mixed
   training. `training.hf_dataset=Vack0/moe-5g-nrx` activates HF-backed training,
   replacing the Sionna iterable pipeline.
+- `src/data/cached_dataset.py`: HF training is now batch-native via
+  `HuggingFaceNRXBatchIterableDataset`, avoiding per-sample Python object
+  creation and `torch.stack` collation in the hot training path.
 - `validation.hf_dataset` also supported but unused so far — existing `.pt`
   val/test files still work.
 - `datasets>=3.0.0` added to dependencies.
