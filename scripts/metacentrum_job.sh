@@ -139,11 +139,13 @@ JOB_RESULT_DIR="$RESULTS_ROOT/$JOB_LABEL"
 export TMPDIR="$SCRATCHDIR/tmp"
 export XDG_CACHE_HOME="$SCRATCHDIR/.cache"
 # HuggingFace caches — force to persistent storage so we don't re-download
-# 100GB of parquet every job. Setting all three variables explicitly because
-# XDG_CACHE_HOME + HF_HOME interaction has bitten us before.
-export HF_HOME="${HF_HOME:-$SUBMIT_HOME/.cache/huggingface}"
-export HF_HUB_CACHE="${HF_HUB_CACHE:-$HF_HOME/hub}"
-export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-$HF_HOME/datasets}"
+# 100GB of parquet every job. MetaCentrum pre-sets HF_HUB_CACHE and
+# HF_DATASETS_CACHE to $SCRATCHDIR by default, so we must unset and then
+# re-export unconditionally (not with `:-` defaulting) to override.
+unset HF_HUB_CACHE HF_DATASETS_CACHE
+export HF_HOME="$SUBMIT_HOME/.cache/huggingface"
+export HF_HUB_CACHE="$HF_HOME/hub"
+export HF_DATASETS_CACHE="$HF_HOME/datasets"
 mkdir -p "$HF_HUB_CACHE" "$HF_DATASETS_CACHE"
 export MPLCONFIGDIR="$SCRATCHDIR/.config/matplotlib"
 export WANDB_DIR="$ARTIFACT_DIR/wandb"

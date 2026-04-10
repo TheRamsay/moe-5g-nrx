@@ -27,7 +27,9 @@ SUBMIT_HOME="${PBS_O_HOME:-$HOME}"
 UV_BIN="${UV_BIN:-$SUBMIT_HOME/.local/bin/uv}"
 [[ -x "$UV_BIN" ]] || UV_BIN="$(command -v uv)"
 
-# Force HF caches to persistent storage
+# Force HF caches to persistent storage. MetaCentrum pre-sets HF_HUB_CACHE
+# and HF_DATASETS_CACHE to $SCRATCHDIR, so unset them first before reassigning.
+unset HF_HUB_CACHE HF_DATASETS_CACHE
 export HF_HOME="$SUBMIT_HOME/.cache/huggingface"
 export HF_HUB_CACHE="$HF_HOME/hub"
 export HF_DATASETS_CACHE="$HF_HOME/datasets"
