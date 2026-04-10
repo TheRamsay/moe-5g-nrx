@@ -10,7 +10,11 @@ import torch
 from omegaconf import DictConfig, open_dict
 from torch.utils.data import DataLoader
 
-from src.data import HuggingFaceNRXDataset, build_dataloader, collate_cached_batch
+from src.data import (
+    HuggingFaceNRXBatchIterableDataset,
+    build_dataloader,
+    collate_single_cached_batch,
+)
 from src.training import Trainer
 
 os.environ["TF_USE_LEGACY_KERAS"] = "1"
@@ -67,16 +71,24 @@ def _build_hf_train_loader(cfg: DictConfig, hf_repo: str):
 
     loaders = {}
     for profile in profiles:
-        ds = HuggingFaceNRXDataset(hf_repo, profile, "train")
-        print(f"[INFO] HF training dataset: {hf_repo}/{profile}/train ({len(ds)} samples)")
+        ds = HuggingFaceNRXBatchIterableDataset(
+            hf_repo,
+            profile,
+            "train",
+            batch_size=batch_size,
+            drop_last=True,
+            shuffle=True,
+            base_seed=int(cfg.runtime.seed),
+        )
+        print(
+            f"[INFO] HF training dataset: {hf_repo}/{profile}/train ({ds.num_samples} samples, {len(ds)} batches/epoch)"
+        )
         loaders[profile] = DataLoader(
             ds,
-            batch_size=batch_size,
-            shuffle=True,
+            batch_size=None,
             num_workers=num_workers,
             pin_memory=True,
-            collate_fn=collate_cached_batch,
-            drop_last=True,
+            collate_fn=collate_single_cached_batch,
             persistent_workers=num_workers > 0,
             prefetch_factor=prefetch_factor if num_workers > 0 else None,
         )

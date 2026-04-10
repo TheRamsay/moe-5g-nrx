@@ -29,6 +29,18 @@ class NRXBatch:
     channel_profile: str
     modulation: str
 
+    def pin_memory(self) -> NRXBatch:
+        """Enable DataLoader pin_memory support for this custom batch type."""
+
+        return NRXBatch(
+            inputs=self.inputs.pin_memory(),
+            bit_labels=self.bit_labels.pin_memory(),
+            channel_target=self.channel_target.pin_memory(),
+            snr_db=self.snr_db.pin_memory(),
+            channel_profile=self.channel_profile,
+            modulation=self.modulation,
+        )
+
 
 class NRXIterableDataset(IterableDataset[NRXBatch]):
     """Wraps the simulator with a PyTorch IterableDataset API."""

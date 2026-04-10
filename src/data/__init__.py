@@ -2,9 +2,11 @@ from .cached_dataset import (
     CachedNRXBatch,
     CachedNRXDataset,
     CachedNRXSample,
+    HuggingFaceNRXBatchIterableDataset,
     HuggingFaceNRXDataset,
     build_cached_dataloader,
     collate_cached_batch,
+    collate_single_cached_batch,
 )
 from .constants import GENERATABLE_PROFILES, ChannelProfile
 from .sionna_generator import SimulatorBatch, SimulatorConfig, SionnaNRXSimulator, build_simulator_from_cfg
@@ -16,6 +18,7 @@ __all__ = [
     "CachedNRXSample",
     "ChannelProfile",
     "GENERATABLE_PROFILES",
+    "HuggingFaceNRXBatchIterableDataset",
     "HuggingFaceNRXDataset",
     "MixedNRXIterableDataset",
     "NRXBatch",
@@ -26,5 +29,6 @@ __all__ = [
     "build_dataloader",
     "build_simulator_from_cfg",
     "collate_cached_batch",
+    "collate_single_cached_batch",
     "peek_batch",
 ]
