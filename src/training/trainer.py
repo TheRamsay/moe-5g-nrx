@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import time
 from collections import defaultdict, deque
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,21 @@ class Trainer:
         self.use_wandb = setup_wandb(cfg, job_id=job_id, job_type="train")
         self.model = self._build_model().to(self.device)
         self.num_parameters = sum(parameter.numel() for parameter in self.model.parameters())
+        self._amp_dtype = self._resolve_amp_dtype(cfg.training.get("mixed_precision"))
+        if (
+            self.device.type == "cuda"
+            and self._amp_dtype == torch.bfloat16
+            and hasattr(torch.cuda, "is_bf16_supported")
+            and not torch.cuda.is_bf16_supported()
+        ):
+            print("[WARNING] bf16 AMP requested but not supported on this GPU, disabling mixed precision")
+            self._amp_dtype = None
+        self._amp_enabled = self.device.type == "cuda" and self._amp_dtype is not None
+        scaler_enabled = self._amp_enabled and self._amp_dtype == torch.float16
+        if hasattr(torch, "amp") and hasattr(torch.amp, "GradScaler"):
+            self.grad_scaler = torch.amp.GradScaler("cuda", enabled=scaler_enabled)
+        else:  # pragma: no cover - compatibility path
+            self.grad_scaler = torch.cuda.amp.GradScaler(enabled=scaler_enabled)
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(),
             lr=float(cfg.training.learning_rate),
@@ -64,18 +80,28 @@ class Trainer:
         channel_targets = channel_targets.to(self.device)
 
         self.optimizer.zero_grad(set_to_none=True)
-        outputs = self.model(features)
-        logits = outputs["logits"]
-        channel_estimate = outputs["channel_estimate"]
-        loss = self._compute_loss(outputs, targets, channel_targets)
-        loss.backward()
+        with self._autocast_context():
+            outputs = self.model(features)
+            loss = self._compute_loss(outputs, targets, channel_targets)
+
+        if self.grad_scaler.is_enabled():
+            self.grad_scaler.scale(loss).backward()
+            self.grad_scaler.unscale_(self.optimizer)
+        else:
+            loss.backward()
 
         clip_value = float(self.cfg.training.gradient_clip_norm)
         grad_norm = float(torch.nn.utils.clip_grad_norm_(self.model.parameters(), clip_value))
-        self.optimizer.step()
+        if self.grad_scaler.is_enabled():
+            self.grad_scaler.step(self.optimizer)
+            self.grad_scaler.update()
+        else:
+            self.optimizer.step()
         if self.scheduler is not None:
             self.scheduler.step()
 
+        logits = outputs["logits"].float()
+        channel_estimate = outputs["channel_estimate"].float()
         error_metrics = compute_batch_error_metrics(
             logits,
             targets,
@@ -274,6 +300,7 @@ class Trainer:
             {
                 "model_state_dict": self.model.state_dict(),
                 "optimizer_state_dict": self.optimizer.state_dict(),
+                "grad_scaler_state_dict": self.grad_scaler.state_dict() if self.grad_scaler.is_enabled() else None,
                 "scheduler_state_dict": self.scheduler.state_dict() if self.scheduler is not None else None,
                 "global_step": self.global_step,
                 "config": OmegaConf.to_container(self.cfg, resolve=True),
@@ -346,6 +373,7 @@ class Trainer:
         wandb.run.summary["model/family"] = str(self.cfg.model.family)
         wandb.run.summary["model/name"] = str(self.cfg.model.name)
         wandb.run.summary["runtime/device"] = str(self.device)
+        wandb.run.summary["runtime/mixed_precision"] = self._mixed_precision_mode()
         if hasattr(self.model, "expert_names"):
             wandb.run.summary["model/expert_names"] = list(getattr(self.model, "expert_names"))
 
@@ -420,6 +448,33 @@ class Trainer:
             print("[WARNING] CUDA requested but not available, falling back to CPU")
             return torch.device("cpu")
         return torch.device(device_name)
+
+    @staticmethod
+    def _resolve_amp_dtype(mode: object) -> torch.dtype | None:
+        if mode is None:
+            return None
+        normalized = str(mode).strip().lower()
+        if normalized in {"", "none", "null", "off", "false"}:
+            return None
+        if normalized == "fp16":
+            return torch.float16
+        if normalized == "bf16":
+            return torch.bfloat16
+        raise ValueError(f"Unsupported training.mixed_precision: {mode}")
+
+    def _mixed_precision_mode(self) -> str:
+        if not self._amp_enabled or self._amp_dtype is None:
+            return "off"
+        if self._amp_dtype == torch.float16:
+            return "fp16"
+        if self._amp_dtype == torch.bfloat16:
+            return "bf16"
+        return str(self._amp_dtype)
+
+    def _autocast_context(self):
+        if not self._amp_enabled or self._amp_dtype is None:
+            return nullcontext()
+        return torch.autocast(device_type=self.device.type, dtype=self._amp_dtype)
 
     def _compute_loss(
         self,
@@ -565,11 +620,12 @@ class Trainer:
             targets = batch.bit_labels.flatten(start_dim=1).to(self.device)
             channel_targets = batch.channel_target.to(self.device)
 
-            outputs = self.model(features)
-            logits = outputs["logits"]
-            channel_estimate = outputs["channel_estimate"]
+            with self._autocast_context():
+                outputs = self.model(features)
+                loss = self._compute_loss(outputs, targets, channel_targets)
 
-            loss = self._compute_loss(outputs, targets, channel_targets)
+            logits = outputs["logits"].float()
+            channel_estimate = outputs["channel_estimate"].float()
             total_loss += float(loss.item())
 
             error_metrics = compute_batch_error_metrics(
