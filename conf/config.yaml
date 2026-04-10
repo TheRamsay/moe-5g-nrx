@@ -25,8 +25,8 @@ data:
 
 training:
     hf_dataset: null        # e.g. "Vack0/moe-5g-nrx" — use HuggingFace dataset instead of on-the-fly Sionna
-    hf_num_workers: 4       # data loader workers for HF training (more = better GPU util, up to ncpus)
-    hf_prefetch_factor: 4   # batches each worker prefetches
+    hf_num_workers: 2       # per-profile HF loader workers; in mixed mode this becomes 4 total workers
+    hf_prefetch_factor: 1   # higher prefetch increased RAM and slowed same-GPU runs
     batch_size: 32
     learning_rate: 0.001
     weight_decay: 0.0001

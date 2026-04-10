@@ -8,8 +8,16 @@ This is a **domain-aware** project, not just "more layers": routing should use c
 
 ## Current Project State
 
-- **Data pipeline:** training uses on-the-fly **Sionna** generation; validation/test use cached `.pt` datasets.
+- **Data pipeline:** training loads from `Vack0/moe-5g-nrx` on HuggingFace
+  (250k samples per profile, cached in persistent storage on the cluster).
+  On-the-fly Sionna generation is still supported but no longer the default.
+  Validation/test use cached `.pt` datasets.
 - **Training distribution:** `mixed` = alternating `uma` and `tdlc` batches.
+  For HF training, two per-profile DataLoaders are interleaved by
+  `_AlternatingLoader` in `main.py`.
+- **Locked HF loader setting:** `training.hf_num_workers=2`,
+  `training.hf_prefetch_factor=1`. In `mixed` mode this means 4 workers total;
+  higher prefetch increased walltime and host RAM on controlled same-GPU runs.
 - **Validation / test policy:** cached `uma` and `tdlc` only; 7 SNR bins enabled by default in evaluation.
 - **Important fix already applied:** channel power is normalized across profiles in `src/data/sionna_generator.py`, so nominal SNR is now comparable between `UMa` and `TDL-C`.
 
@@ -236,34 +244,44 @@ MEAN is the closest prior work. Key differences:
 
 ## GPU Utilization & Training Data
 
-On-the-fly Sionna generation is the training bottleneck — 6.9x slower than the GPU training
-step on an A40 (483ms gen vs 70ms step). GPU sits idle ~87% of the time.
+Historically on-the-fly Sionna generation was the training bottleneck — 6.9×
+slower than the GPU step on an A40 (483ms gen vs 70ms step), leaving the GPU
+idle ~87% of the time. Cached training data was the planned fix but
+`scripts/generate_datasets.py` hit a cascade of TF/PyTorch memory issues
+(see `PROBLEM.md`) and was never successfully run to produce a 500k-sample
+cache.
 
-**CPU Sionna profiling results (job 18730965, finished):**
+**Current solution: HuggingFace dataset (`Vack0/moe-5g-nrx`).**
+- 250k train + 20k val + 40k test samples per profile (uma, tdlc).
+- Column schema already matches the project (`inputs`, `bit_labels`,
+  `channel_target`, `snr_db`) — no conversion needed.
+- Replicated the dense large Sionna baseline at 10k steps with HF training
+  (run `2qgunl39`, 2026-04-09): val tdlc BER=0.1249, val uma BER=0.2748,
+  `best_score=0.1998`. Matches the Sionna baseline to within normal noise.
 
-| Mode | Batch time | vs GPU step (70ms) |
-|---|---:|---:|
-| Sionna GPU (workers=0) | 483 ms | 6.9× |
-| Sionna CPU (workers=0) | 699 ms | 10.0× |
-| Sionna CPU (workers=2) | 546 ms | 7.8× |
+**Activating HF training:** set `training.hf_dataset=Vack0/moe-5g-nrx` in the
+config. `main.py` builds `HuggingFaceNRXDataset` (lazy Arrow, memory-mapped),
+and for mixed training interleaves two per-profile DataLoaders via
+`_AlternatingLoader`. `_TrainingBatchAdapter` works on both `NRXBatch` (Sionna)
+and `CachedNRXBatch` (HF/.pt) since they share the same attribute names.
 
-**Conclusion: CPU Sionna does not help.** CPU gen is slower than GPU gen (699ms vs 483ms).
-Even with workers=2, estimated GPU util ≈ 13% — same as today's on-the-fly setup (~15%).
-The gen/step ratio (~8-10×) is simply too large for overlap to matter.
+**Cache location — important.** MetaCentrum pre-sets `HF_HUB_CACHE` and
+`HF_DATASETS_CACHE` to `$SCRATCHDIR` as part of the job environment. Without
+unsetting these before re-exporting, jobs re-download ~100GB every run.
+`scripts/metacentrum_job.sh` handles this. The dataset is pre-cached at
+`/storage/brno2/home/ramsay/.cache/huggingface/` on the cluster (124GB hub
+parquets + 126GB Arrow for both profiles). Use `scripts/predownload_hf.sh`
+to warm the cache from scratch on a new cluster.
 
-**Fix: cached training data.** 500k-sample dataset targeted at
-`~/moe-5g-datasets/train-500k-v1/train/{uma,tdlc}.pt`.
-This eliminates Sionna from the training loop entirely.
-Storage: ~48 KB/sample → 500k samples ≈ 24 GB per profile.
+**HF loader sweep result (locked):** broad sweeps plus same-GPU confirmation on
+the `16 GB` Quadro RTX 5000 class showed that `workers=2, prefetch=1` is the
+best operating point for mixed HF dense training. `prefetch=2` slightly changed
+final loss but increased walltime from 18m10s to 29m22s and peak RAM from
+20.2 GB to 35.8 GB, so the extra queued batches hurt throughput.
 
-**Generation is blocked — see `PROBLEM.md` for full crash history.**
-Five PBS jobs have failed. Root causes resolved so far:
-- TF session memory leak across batches → fixed by subprocess-isolated 100k chunks
-- PyTorch allocator retains freed shard pages in glibc heap → fix: `malloc_trim(0)` after each shard
-- Child TF GPU init overhead → fixed by `CUDA_VISIBLE_DEVICES=""` in worker (CPU-only TF)
-
-Proposed fix (`malloc_trim`) is coded in `scripts/generate_datasets.py` but not yet submitted.
-Expected peak RAM with fix: ~50 GB (parent 25 GB + child TF CPU 25 GB) — safe under 64 GB.
+**`generate_datasets.py` is effectively deprecated.** Keep it around for now
+in case we need to regenerate val/test with different simulator parameters,
+but training data should come from the HF dataset.
 
 ## Key Rules For Future Work
 
@@ -274,3 +292,9 @@ Expected peak RAM with fix: ~50 GB (parent 25 GB + child TF CPU 25 GB) — safe 
 - **Multi-seed (≥3)** only for final chosen model variants — not during exploration
 - **Test set is locked** — run evaluate.py on test split exactly once per final model variant
 - **state_dim=56** for all MoE experiments — do not use s32 (costs 15pp waterfall BLER)
+- **HF training is the default** — set `training.hf_dataset=Vack0/moe-5g-nrx`.
+  Never trust `${HF_HUB_CACHE:-default}` style defaults on MetaCentrum; always
+  `unset` and re-export unconditionally.
+- **For mixed HF dense runs**, use the locked loader default unless profiling a
+  code change: `hf_num_workers=2`, `hf_prefetch_factor=1`, and request enough
+  host resources to support the loader (`ncpus≈8`, `mem≈48gb`).

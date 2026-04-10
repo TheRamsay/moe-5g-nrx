@@ -54,8 +54,8 @@ def _build_hf_train_loader(cfg: DictConfig, hf_repo: str):
     else:
         profiles = [channel_profile]
 
-    num_workers = int(cfg.training.get("hf_num_workers", 4))
-    prefetch_factor = int(cfg.training.get("hf_prefetch_factor", 4))
+    num_workers = int(cfg.training.get("hf_num_workers", 2))
+    prefetch_factor = int(cfg.training.get("hf_prefetch_factor", 1))
     total_workers = num_workers * len(profiles)
 
     print(

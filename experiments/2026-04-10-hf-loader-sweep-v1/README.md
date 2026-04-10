@@ -68,3 +68,26 @@ Choose the smallest worker/prefetch setting that:
 
 If all variants remain data-bound, the next step is code-level optimization in
 the HF dataset path rather than further worker tuning.
+
+## Results
+
+Broad sweep outcome across mixed GPU families:
+
+| Exp name | Job | GPU family | Walltime | Status |
+|---|---:|---|---:|---|
+| `hf_loader_w0_p0` | `18884682` | Quadro RTX 5000 | 1h01m32s | crashed |
+| `hf_loader_w1_p1` | `18884683` | A100 40GB | 42m53s | finished |
+| `hf_loader_w1_p2` | `18884684` | L40S | 49m05s | finished |
+| `hf_loader_w2_p1` | `18884685` | RTX PRO 6000 Blackwell | 34m53s | finished |
+| `hf_loader_w2_p2` | `18884686` | RTX PRO 6000 Blackwell | 28m56s | finished |
+
+This sweep was useful for ruling out `workers=0`, but it did **not** cleanly
+identify the winner because runs landed on different GPU classes.
+
+Takeaways from the broad sweep:
+- `workers=0` is clearly unusable.
+- `workers=2` is better than `workers=1`.
+- A same-GPU confirmation run is required before locking `prefetch`.
+
+See `../2026-04-10-hf-loader-confirm-v1/README.md` for the controlled final
+decision.
