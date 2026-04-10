@@ -58,6 +58,12 @@ export UV_CACHE_DIR="${UV_CACHE_DIR:-${HOME}/.cache/uv}"
 export UV_PYTHON_INSTALL_DIR="${UV_PYTHON_INSTALL_DIR:-${HOME}/.local/share/uv/python}"
 export UV_LINK_MODE=copy
 
+# Keep CPU threadpools from oversubscribing dataloader-heavy jobs.
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
+export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
+export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-1}"
+export NUMEXPR_NUM_THREADS="${NUMEXPR_NUM_THREADS:-1}"
+
 WORK_ROOT="${SCRATCHDIR}/work"
 ARTIFACT_DIR="${SCRATCHDIR}/artifacts"
 
@@ -69,6 +75,12 @@ export WANDB_DIR="${ARTIFACT_DIR}/wandb"
 export WANDB_CACHE_DIR="${SCRATCHDIR}/.cache/wandb"
 export RUN_OUTPUT_DIR="${ARTIFACT_DIR}"
 export PYTHONUNBUFFERED=1
+
+# HuggingFace caches must stay on persistent storage, not scratch.
+unset HF_HUB_CACHE HF_DATASETS_CACHE
+export HF_HOME="${HF_HOME:-${HOME}/.cache/huggingface}"
+export HF_HUB_CACHE="$HF_HOME/hub"
+export HF_DATASETS_CACHE="$HF_HOME/datasets"
 
 # =============================================================================
 # Helper Functions
@@ -104,7 +116,7 @@ stage_code() {
 # Create venv on scratch from cached packages
 setup_venv() {
     log "Setting up Python environment on scratch..."
-    mkdir -p "$TMPDIR" "$XDG_CACHE_HOME" "$MPLCONFIGDIR" "$WANDB_DIR"
+    mkdir -p "$TMPDIR" "$XDG_CACHE_HOME" "$MPLCONFIGDIR" "$WANDB_DIR" "$HF_HUB_CACHE" "$HF_DATASETS_CACHE"
     (
         cd "$WORK_ROOT"
         UV_PROJECT_ENVIRONMENT="$WORK_ROOT/.venv" \
@@ -154,6 +166,10 @@ env_status() {
     echo "Artifacts:     $ARTIFACT_DIR"
     echo "UV binary:     $UV_BIN"
     echo "UV cache:      $UV_CACHE_DIR"
+    echo "HF home:       $HF_HOME"
+    echo "HF hub cache:  $HF_HUB_CACHE"
+    echo "HF ds cache:   $HF_DATASETS_CACHE"
+    echo "OMP threads:   $OMP_NUM_THREADS"
     echo "Python:        $("$UV_BIN" run --offline --python 3.10 python --version 2>/dev/null || echo 'Not ready')"
     echo "CUDA devices:  ${CUDA_VISIBLE_DEVICES:-N/A}"
     if command -v nvidia-smi &>/dev/null; then
@@ -210,6 +226,9 @@ printf 'job_id=%s\n' "${PBS_JOBID:-interactive}" > "$ARTIFACT_DIR/job.txt"
 printf 'hostname=%s\n' "$(hostname -f)" >> "$ARTIFACT_DIR/job.txt"
 printf 'scratchdir=%s\n' "$SCRATCHDIR" >> "$ARTIFACT_DIR/job.txt"
 printf 'cuda_visible_devices=%s\n' "${CUDA_VISIBLE_DEVICES:-}" >> "$ARTIFACT_DIR/job.txt"
+printf 'hf_home=%s\n' "${HF_HOME:-}" >> "$ARTIFACT_DIR/job.txt"
+printf 'hf_hub_cache=%s\n' "${HF_HUB_CACHE:-}" >> "$ARTIFACT_DIR/job.txt"
+printf 'hf_datasets_cache=%s\n' "${HF_DATASETS_CACHE:-}" >> "$ARTIFACT_DIR/job.txt"
 
 if command -v nvidia-smi &>/dev/null; then
     nvidia-smi > "$ARTIFACT_DIR/nvidia-smi.txt" 2>/dev/null || true

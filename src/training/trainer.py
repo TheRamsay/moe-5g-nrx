@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import time
 from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any
@@ -118,14 +119,25 @@ class Trainer:
         overfit_min_steps = int(self.cfg.training.get("overfit_min_steps", 100))
 
         while self.global_step < num_steps:
+            fetch_start = time.perf_counter()
             try:
                 batch = next(data_iterator)
             except StopIteration:
                 data_iterator = iter(train_loader)
                 batch = next(data_iterator)
+            data_time = time.perf_counter() - fetch_start
 
+            step_start = time.perf_counter()
             metrics = self.train_step(batch)
+            step_time = time.perf_counter() - step_start
+            iter_time = data_time + step_time
+            batch_size = int(batch[0].shape[0])
+            samples_per_s = batch_size / iter_time if iter_time > 0 else 0.0
             self.global_step += 1
+            metrics["data_time_s"] = data_time
+            metrics["step_time_s"] = step_time
+            metrics["iter_time_s"] = iter_time
+            metrics["samples_per_s"] = samples_per_s
             train_metrics = self._build_smoothed_train_metrics(metrics)
 
             progress.update(1)
@@ -154,6 +166,8 @@ class Trainer:
                 print(
                     f"step={self.global_step} loss={metrics['loss']:.4f} "
                     f"ema_loss={train_metrics['ema/loss']:.4f} "
+                    f"data_t={metrics['data_time_s']:.3f}s step_t={metrics['step_time_s']:.3f}s "
+                    f"iter_t={metrics['iter_time_s']:.3f}s samples_s={metrics['samples_per_s']:.1f} "
                     f"ber={metrics['ber']:.4f} ser={metrics['ser']:.4f} bler={metrics['bler']:.4f} "
                     f"profile={profile} "
                     f"{compute_summary}"

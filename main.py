@@ -56,6 +56,14 @@ def _build_hf_train_loader(cfg: DictConfig, hf_repo: str):
 
     num_workers = int(cfg.training.get("hf_num_workers", 4))
     prefetch_factor = int(cfg.training.get("hf_prefetch_factor", 4))
+    total_workers = num_workers * len(profiles)
+
+    print(
+        "[INFO] HF train loader config: "
+        f"repo={hf_repo} profiles={profiles} batch_size={batch_size} "
+        f"per_profile_workers={num_workers} total_workers={total_workers} "
+        f"prefetch_factor={prefetch_factor}"
+    )
 
     loaders = {}
     for profile in profiles:
