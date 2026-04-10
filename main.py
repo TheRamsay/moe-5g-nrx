@@ -54,6 +54,9 @@ def _build_hf_train_loader(cfg: DictConfig, hf_repo: str):
     else:
         profiles = [channel_profile]
 
+    num_workers = int(cfg.training.get("hf_num_workers", 4))
+    prefetch_factor = int(cfg.training.get("hf_prefetch_factor", 4))
+
     loaders = {}
     for profile in profiles:
         ds = HuggingFaceNRXDataset(hf_repo, profile, "train")
@@ -62,10 +65,12 @@ def _build_hf_train_loader(cfg: DictConfig, hf_repo: str):
             ds,
             batch_size=batch_size,
             shuffle=True,
-            num_workers=2,
+            num_workers=num_workers,
             pin_memory=True,
             collate_fn=collate_cached_batch,
             drop_last=True,
+            persistent_workers=num_workers > 0,
+            prefetch_factor=prefetch_factor if num_workers > 0 else None,
         )
 
     if len(loaders) == 1:

@@ -138,7 +138,13 @@ JOB_RESULT_DIR="$RESULTS_ROOT/$JOB_LABEL"
 
 export TMPDIR="$SCRATCHDIR/tmp"
 export XDG_CACHE_HOME="$SCRATCHDIR/.cache"
+# HuggingFace caches — force to persistent storage so we don't re-download
+# 100GB of parquet every job. Setting all three variables explicitly because
+# XDG_CACHE_HOME + HF_HOME interaction has bitten us before.
 export HF_HOME="${HF_HOME:-$SUBMIT_HOME/.cache/huggingface}"
+export HF_HUB_CACHE="${HF_HUB_CACHE:-$HF_HOME/hub}"
+export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-$HF_HOME/datasets}"
+mkdir -p "$HF_HUB_CACHE" "$HF_DATASETS_CACHE"
 export MPLCONFIGDIR="$SCRATCHDIR/.config/matplotlib"
 export WANDB_DIR="$ARTIFACT_DIR/wandb"
 export WANDB_CACHE_DIR="$SCRATCHDIR/.cache/wandb"
@@ -189,6 +195,10 @@ printf 'job_id=%s\n' "${PBS_JOBID:-local}" > "$ARTIFACT_DIR/job.txt"
 printf 'hostname=%s\n' "$(hostname -f)" >> "$ARTIFACT_DIR/job.txt"
 printf 'scratchdir=%s\n' "$SCRATCHDIR" >> "$ARTIFACT_DIR/job.txt"
 printf 'cuda_visible_devices=%s\n' "${CUDA_VISIBLE_DEVICES:-}" >> "$ARTIFACT_DIR/job.txt"
+printf 'hf_home=%s\n' "${HF_HOME:-}" >> "$ARTIFACT_DIR/job.txt"
+printf 'hf_hub_cache=%s\n' "${HF_HUB_CACHE:-}" >> "$ARTIFACT_DIR/job.txt"
+printf 'hf_datasets_cache=%s\n' "${HF_DATASETS_CACHE:-}" >> "$ARTIFACT_DIR/job.txt"
+printf 'submit_home=%s\n' "${SUBMIT_HOME:-}" >> "$ARTIFACT_DIR/job.txt"
 
 if command -v module >/dev/null 2>&1; then
     module -t list > "$ARTIFACT_DIR/modules.txt" 2>&1 || true
