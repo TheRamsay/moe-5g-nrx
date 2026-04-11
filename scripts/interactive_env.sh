@@ -49,6 +49,11 @@ split_cli_args() {
 # =============================================================================
 
 REPO_ROOT="${REPO_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}"
+SUBMIT_HOME="${PBS_O_HOME:-$HOME}"
+if [[ -z "$SUBMIT_HOME" || ! -d "$SUBMIT_HOME" || "$SUBMIT_HOME" == /scratch* || "$SUBMIT_HOME" == /var/spool/* ]]; then
+    SUBMIT_HOME="$(dirname -- "$REPO_ROOT")"
+fi
+export HOME="$SUBMIT_HOME"
 UV_BIN="${UV_BIN:-${HOME}/.local/bin/uv}"
 if [[ ! -x "$UV_BIN" ]]; then
     UV_BIN="$(command -v uv || true)"
