@@ -32,7 +32,7 @@ model:
 training:
   hf_dataset: Vack0/moe-5g-nrx
   batch_size: 128
-  hf_num_workers: 6
+  hf_num_workers: 4
   hf_prefetch_factor: 1
   learning_rate: 1e-3
   weight_decay: 1e-4
