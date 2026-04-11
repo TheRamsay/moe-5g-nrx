@@ -2,8 +2,8 @@ name: compute_aware_moe_nrx
 family: moe
 
 shared_stem:
-    state_dim: 32
-    stem_hidden_dims: [32, 32]
+    state_dim: 56
+    stem_hidden_dims: [64, 64]
     activation: relu
     pilot_symbol_indices: [2, 11]
     pilot_subcarrier_spacing: 2

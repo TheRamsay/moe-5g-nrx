@@ -30,7 +30,10 @@ class Trainer:
         self.job_id = job_id
         self.device = self._resolve_device(str(cfg.runtime.device))
         self.use_wandb = setup_wandb(cfg, job_id=job_id, job_type="train")
-        self.model = self._build_model().to(self.device)
+        self.model = self._build_model()
+        self._apply_warm_start()
+        self._apply_freeze_config()
+        self.model = self.model.to(self.device)
         self.num_parameters = sum(parameter.numel() for parameter in self.model.parameters())
         self._amp_dtype = self._resolve_amp_dtype(cfg.training.get("mixed_precision"))
         if (
@@ -48,7 +51,7 @@ class Trainer:
         else:  # pragma: no cover - compatibility path
             self.grad_scaler = torch.cuda.amp.GradScaler(enabled=scaler_enabled)
         self.optimizer = torch.optim.AdamW(
-            self.model.parameters(),
+            [p for p in self.model.parameters() if p.requires_grad],
             lr=float(cfg.training.learning_rate),
             weight_decay=float(cfg.training.weight_decay),
         )
@@ -143,8 +146,12 @@ class Trainer:
         overfit_enabled = bool(self.cfg.training.get("overfit_single_batch", False))
         overfit_stop_loss = float(self.cfg.training.get("overfit_stop_loss", 0.01))
         overfit_min_steps = int(self.cfg.training.get("overfit_min_steps", 100))
+        unfreeze_at_step = int(self.cfg.training.get("unfreeze_experts_at_step", 0))
 
         while self.global_step < num_steps:
+            if unfreeze_at_step > 0 and self.global_step == unfreeze_at_step:
+                self._unfreeze_experts()
+
             fetch_start = time.perf_counter()
             try:
                 batch = next(data_iterator)
@@ -357,6 +364,58 @@ class Trainer:
             )
 
         raise ValueError(f"Unsupported training.scheduler.name: {scheduler_name}")
+
+    def _apply_warm_start(self) -> None:
+        """Load dense checkpoint weights into MoE stem and expert branches if configured."""
+        warm_cfg = self.cfg.training.get("warm_start")
+        if not warm_cfg:
+            return
+        from src.models.warm_start import load_warm_start
+
+        stem_ckpt = str(warm_cfg.get("stem_checkpoint", ""))
+        experts_cfg = warm_cfg.get("experts") or {}
+        if not stem_ckpt or not experts_cfg:
+            raise ValueError("training.warm_start requires stem_checkpoint and experts mapping")
+        load_warm_start(
+            self.model,
+            stem_checkpoint=stem_ckpt,
+            expert_checkpoints={str(k): str(v) for k, v in experts_cfg.items()},
+            device="cpu",
+        )
+
+    def _apply_freeze_config(self) -> None:
+        """Freeze all expert parameters if training.freeze_experts=true (Stage 2B)."""
+        if not bool(self.cfg.training.get("freeze_experts", False)):
+            return
+        if not hasattr(self.model, "experts"):
+            print("[WARNING] freeze_experts=true but model has no .experts attribute — ignoring")
+            return
+        for param in self.model.experts.parameters():
+            param.requires_grad_(False)
+        frozen = sum(p.numel() for p in self.model.experts.parameters())
+        total = sum(p.numel() for p in self.model.parameters())
+        print(f"[INFO] Frozen {frozen:,} expert params " f"({100 * frozen / max(total, 1):.1f}% of {total:,} total)")
+
+    def _unfreeze_experts(self) -> None:
+        """Unfreeze expert parameters and add them to the optimizer (Stage 2C transition)."""
+        if not hasattr(self.model, "experts"):
+            return
+        newly_trainable = [p for p in self.model.experts.parameters() if not p.requires_grad]
+        for p in newly_trainable:
+            p.requires_grad_(True)
+        if newly_trainable:
+            self.optimizer.add_param_group(
+                {
+                    "params": newly_trainable,
+                    "lr": float(self.cfg.training.learning_rate),
+                    "weight_decay": float(self.cfg.training.weight_decay),
+                }
+            )
+            print(
+                f"  [UNFREEZE] step={self.global_step}: "
+                f"unfroze {sum(p.numel() for p in newly_trainable):,} expert params — "
+                "joint fine-tune begins"
+            )
 
     def cleanup(self):
         """Cleanup and finish logging."""
