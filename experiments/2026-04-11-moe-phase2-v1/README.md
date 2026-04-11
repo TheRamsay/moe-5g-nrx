@@ -85,3 +85,28 @@ To fix router collapse:
 2. **Capacity constraints**: hard cap on fraction routed to large (e.g. max 60%)
 3. **Alpha/beta sweep**: find the regime where routing diversity and BLER are both acceptable
 4. **Curriculum**: start with higher alpha/beta, anneal down as routing stabilises
+
+## Test-Split Evaluation
+
+Evaluation job `18936628` — checkpoint `model-moe_phase2_v1_a1e3_b0p1_s67-89no8f1k:best`
+(step 12 000), 32 768 samples per profile.  
+W&B run: `yf5ewcvz` (`moe_phase2_v1_a1e3_b0p1_s67_eval_uma-tdlc`).
+
+| Metric | TDLC | UMA |
+|---|---|---|
+| BLER | 0.835 | 0.923 |
+| BER | 0.119 | 0.265 |
+| realized_flops | 1.604 G | 1.604 G |
+| FLOPs ratio vs dense large | 1.00 | 1.00 |
+| expert: large | 100% | 100% |
+| expert: small | 0% | 0% |
+| expert: nano | 0% | 0% |
+
+**Interpretation.** Test split confirms the training-time observation: 100% large on both
+profiles, zero routing diversity, full dense-large FLOPs. BLER is strong (best Phase 2
+we've measured) but the model is functionally a fine-tuned dense-large, not a MoE.
+
+Together with Phase 1 s56, this bookends the Pareto space: Phase 1 s56 sits at
+~48% FLOPs / 0.926 avg BLER, Phase 2 v1 sits at 100% FLOPs / 0.879 avg BLER. The anti-collapse
+experiments (beta sweep, capacity constraint, switch aux, asymmetric warm-start) target the
+interior of this curve.

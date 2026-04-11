@@ -42,7 +42,7 @@ attacks the root cause: remove the head-start.
 
 | Job ID | W&B run | Status |
 |--------|---------|--------|
-| — | — | pending |
+| 18937005 | _tbd_ | submitted 2026-04-12 |
 
 ## What To Watch
 

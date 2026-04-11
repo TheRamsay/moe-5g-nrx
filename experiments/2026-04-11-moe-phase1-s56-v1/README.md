@@ -57,3 +57,30 @@ Neither Pareto-dominates dense large: lower FLOPs but significantly worse high-S
 Proceed to Phase 2 (warm-start + staged training) to test whether pre-trained experts and
 router pre-training can prevent the router from collapsing away from large. If Phase 2 also
 fails, next step is a beta/alpha sweep or capacity-constrained routing.
+
+## Test-Split Evaluation
+
+Evaluation job `18936627` — checkpoint `model-moe_phase1_s56_a1e3_b0p1_s67-2op33pak:best`
+(step 9000), 32 768 samples per profile.  
+W&B run: `xdb6fzll` (`moe_phase1_s56_a1e3_b0p1_s67_eval_uma-tdlc`).
+
+| Metric | TDLC | UMA |
+|---|---|---|
+| BLER | 0.906 | 0.945 |
+| BER | 0.129 | 0.277 |
+| realized_flops | 917 M | 628 M |
+| FLOPs ratio vs dense large (1.604 G) | 0.57 | 0.39 |
+| expert: large | 39% | 20% |
+| expert: small | 24% | 14% |
+| expert: nano | 36% | 66% |
+
+**Interpretation.** Unlike the EMA training snapshot (which suggested the router had
+abandoned large entirely), the held-out test eval shows genuinely **heterogeneous routing**
+at the best checkpoint (step 9000): 20–39% of samples go through large, 14–24% through small,
+36–66% through nano. The EMA number on large ≈ 0% was a late-training snapshot, not the best
+checkpoint. UMA (harder channel on average) routes more aggressively to nano, which is
+counter-intuitive — the router seems to equate "hard" with "give up and use the cheap path".
+
+Combined compute: **~772 M realized FLOPs averaged across profiles ≈ 48% of dense large**,
+for +4.7 pp mean BLER (0.926 vs Phase 2 v1's 0.879). This is a real, if extreme,
+Pareto point — the compute-efficient corner of the curve.
