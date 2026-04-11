@@ -1,0 +1,29 @@
+# @package _global_
+# Experiment 16: Dense Large HF tuned training preset
+
+defaults:
+  - override /model: static_dense
+  - override /dataset: mixed
+
+experiment:
+  batch_name: dense-hf-tuned-v1
+  exp_name: dense_large_hf_bs128_w6p1_s67
+  tags: [baseline, dense, hf, tuned, mixed, simo-1x4, 16qam]
+  notes: "Large dense baseline using the batched HF training path. Tuned for ~12 CPU jobs on MetaCentrum."
+  study_slug: 2026-04-11-dense-hf-tuning-v1
+  study_path: experiments/2026-04-11-dense-hf-tuning-v1
+  question: What dense HF training recipe best sustains throughput after the batched loader rewrite?
+
+model:
+  backbone:
+    stem_hidden_dims: [64, 64]
+    block_hidden_dim: 64
+    readout_hidden_dim: 128
+
+training:
+  hf_dataset: Vack0/moe-5g-nrx
+  batch_size: 128
+  hf_num_workers: 6
+  hf_prefetch_factor: 1
+  mixed_precision: null
+  max_steps: 10000

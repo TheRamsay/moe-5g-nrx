@@ -25,9 +25,9 @@ data:
 
 training:
     hf_dataset: null        # e.g. "Vack0/moe-5g-nrx" — use HuggingFace dataset instead of on-the-fly Sionna
-    hf_num_workers: 2       # per-profile HF loader workers; in mixed mode this becomes 4 total workers
-    hf_prefetch_factor: 1   # higher prefetch increased RAM and slowed same-GPU runs
-    mixed_precision: null   # set to fp16 or bf16 for CUDA AMP
+    hf_num_workers: 4       # safe default for mixed HF runs on ~8 CPU jobs; use 6 on ~12 CPU jobs
+    hf_prefetch_factor: 1   # prefetch=1 stayed more stable than prefetch=2 on long mixed runs
+    mixed_precision: null   # optional fp16/bf16 AMP; not locked by default because it did not beat fp32 end-to-end
     batch_size: 32
     learning_rate: 0.001
     weight_decay: 0.0001

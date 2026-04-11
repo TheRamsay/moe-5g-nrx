@@ -15,9 +15,10 @@ This is a **domain-aware** project, not just "more layers": routing should use c
 - **Training distribution:** `mixed` = alternating `uma` and `tdlc` batches.
   For HF training, two per-profile DataLoaders are interleaved by
   `_AlternatingLoader` in `main.py`.
-- **Locked HF loader setting:** `training.hf_num_workers=2`,
-  `training.hf_prefetch_factor=1`. In `mixed` mode this means 4 workers total;
-  higher prefetch increased walltime and host RAM on controlled same-GPU runs.
+- **Locked HF loader setting:** `training.hf_prefetch_factor=1`.
+  Worker count is host-resource aware after the batched-loader rewrite:
+  `hf_num_workers=4` is the safe default for ~8 CPU jobs, while `hf_num_workers=6`
+  is the preferred dense-HF setting for ~12 CPU jobs.
 - **Validation / test policy:** cached `uma` and `tdlc` only; 7 SNR bins enabled by default in evaluation.
 - **Important fix already applied:** channel power is normalized across profiles in `src/data/sionna_generator.py`, so nominal SNR is now comparable between `UMa` and `TDL-C`.
 
@@ -274,11 +275,14 @@ unsetting these before re-exporting, jobs re-download ~100GB every run.
 parquets + 126GB Arrow for both profiles). Use `scripts/predownload_hf.sh`
 to warm the cache from scratch on a new cluster.
 
-**HF loader sweep result (locked):** broad sweeps plus same-GPU confirmation on
-the `16 GB` Quadro RTX 5000 class showed that `workers=2, prefetch=1` is the
-best operating point for mixed HF dense training. `prefetch=2` slightly changed
-final loss but increased walltime from 18m10s to 29m22s and peak RAM from
-20.2 GB to 35.8 GB, so the extra queued batches hurt throughput.
+**HF loader sweep result (relocked after the batched-loader rewrite):** the old
+`workers=2, prefetch=1` result only applied to the original sample-by-sample HF
+path. After moving training to a batch-native HF loader, the best current dense
+settings are `batch_size=128, prefetch=1`, with worker count determined by host
+CPUs: `workers=4` for ~8 CPU jobs and `workers=6` for ~12 CPU jobs. On a 12-CPU
+interactive run, `workers=6, prefetch=1` finished 100 mixed dense steps in about
+42s (run `5gvzene7`). `bf16` AMP reduced `step_t` but did not clearly improve
+end-to-end throughput, so AMP remains optional rather than locked.
 
 **`generate_datasets.py` is effectively deprecated.** Keep it around for now
 in case we need to regenerate val/test with different simulator parameters,
@@ -296,6 +300,7 @@ but training data should come from the HF dataset.
 - **HF training is the default** — set `training.hf_dataset=Vack0/moe-5g-nrx`.
   Never trust `${HF_HUB_CACHE:-default}` style defaults on MetaCentrum; always
   `unset` and re-export unconditionally.
-- **For mixed HF dense runs**, use the locked loader default unless profiling a
-  code change: `hf_num_workers=2`, `hf_prefetch_factor=1`, and request enough
-  host resources to support the loader (`ncpus≈8`, `mem≈48gb`).
+- **For mixed HF dense runs**, use the batched HF path with `batch_size=128`
+  and `hf_prefetch_factor=1`. Worker count should match host resources:
+  `hf_num_workers=4` for ~8 CPU jobs, `hf_num_workers=6` for ~12 CPU jobs.
+  AMP is optional but not locked by default.

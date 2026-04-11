@@ -44,33 +44,30 @@ the cache and start training without re-downloading.
 - `scripts/predownload_hf.sh`: PBS pre-download script (CPU-only, no GPU) for
   warming the HF cache.
 
-### HF loader defaults are now locked
-Short MetaCentrum sweeps identified the safe mixed-training setting for the HF
-path:
+### HF loader defaults are now relocked after the batched-loader rewrite
+The original `w2/p1` lock became stale once HF training moved to the new
+batch-native path. Interactive profiling on MetaCentrum shows the best current
+dense-HF settings are:
 
-- `training.hf_num_workers=2`
-- `training.hf_prefetch_factor=1`
+- **Safe default:** `batch_size=128`, `hf_num_workers=4`, `hf_prefetch_factor=1`
+- **Preferred on ~12 CPU jobs:** `batch_size=128`, `hf_num_workers=6`, `hf_prefetch_factor=1`
+- `mixed_precision=null` stays unlocked by default — `bf16` reduced compute time
+  but did not beat fp32 end-to-end at the tested batch sizes because the loader
+  became the bottleneck again.
 
-Why this is locked:
-- `mixed` training builds two per-profile DataLoaders, so `hf_num_workers=2`
-  means 4 workers total.
-- The original `4/4` setting overcommitted host resources and left the GPU
-  mostly idle.
-- Broad sweep winner was initially ambiguous because runs landed on different
-  GPU families.
-- Controlled confirmation on the same `16 GB` GPU class (`Quadro RTX 5000`)
-  showed `w2_p1` beating `w2_p2` clearly.
+**Key dense-HF runs on the new batched loader:**
 
-**Controlled same-GPU confirm runs:**
+| Setting | Run | Outcome |
+|---|---|---|
+| `w4/p1`, `bs128` | `lrf92vz2` | Stable and strong on smaller CPU budgets |
+| `w6/p1`, `bs128` | `5gvzene7` | Best current result on ~12 CPU jobs; 100 steps in ~42s |
+| `bf16`, `w4/p1`, `bs128` | `9abksolf` | Faster `step_t`, but not a clear end-to-end win |
 
-| Setting | Job | GPU | Walltime | Peak RAM | Final loss | Final BER |
-|---|---:|---|---:|---:|---:|---:|
-| `w2_p1` (`workers=2`, `prefetch=1`) | `18890316` | Quadro RTX 5000 | **18m10s** | **20.2 GB** | 0.2823 | 0.1404 |
-| `w2_p2` (`workers=2`, `prefetch=2`) | `18895412` | Quadro RTX 5000 | 29m22s | 35.8 GB | 0.2720 | 0.1363 |
-
-Interpretation: `prefetch=2` increased host-side in-flight work and memory
-pressure without improving throughput. Tiny final-loss differences are normal
-run noise; for pipeline tuning, walltime and RAM are the deciding metrics.
+Interpretation:
+- Batched HF loading was the major performance fix.
+- For long mixed runs, `prefetch=1` is consistently more stable than `prefetch=2`.
+- Higher worker counts help only when host CPUs are actually available.
+- A separate tuned preset now exists in `conf/experiment/exp16_dense_large_hf_tuned.yaml`.
 
 ---
 
@@ -86,9 +83,8 @@ None.
    training can start as soon as HF training path is proven stable.
    - Stage 1: freeze experts, train router ~2-3k steps
    - Stage 2: unfreeze, joint fine-tune ~10k steps (alpha=1e-3, beta=0.1)
-2. **Interactive loader profiling** — confirm whether the remaining bottleneck
-   is per-sample Arrow→torch conversion / Python collation rather than worker
-   count.
+2. **Promote the tuned dense-HF preset into real batch runs** and use it as the
+   local dense comparison point for future MoE work.
 3. **Retire `generate_datasets.py`** — no longer needed for training data.
 
 ---
