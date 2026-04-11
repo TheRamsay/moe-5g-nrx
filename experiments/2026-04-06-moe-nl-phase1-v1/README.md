@@ -37,9 +37,20 @@ produce a much larger BLER gap between nano and large, giving the router a stron
 
 | Metric | Value | Notes |
 |---|---|---|
-| Router entropy | — | |
-| nano usage | — | |
-| small usage | — | |
-| large usage | — | |
-| val TDLC BER | — | |
-| val UMA BER | — | |
+| Router entropy | ~0.5 | Healthy diversity throughout |
+| nano usage | ~28% | |
+| small usage | ~35% | |
+| large usage | ~38% | |
+| Realized FLOPs ratio | ~0.49 | 49% of dense large |
+| Val TDLC BLER @ SNR=17 | ≈1.0 | Waterfall completely flat — model non-functional |
+| Val TDLC BLER (overall) | ~0.99 | Near-random performance |
+| Root cause | state_dim=32 stem | Stem bottleneck costs ~15pp BLER in waterfall region |
+
+## Conclusion
+
+Routing diversity is healthy (entropy ~0.5, all experts used), but BLER is catastrophic:
+BLER≈1.0 at all SNR bins including high SNR. The stem bottleneck (state_dim=32) prevents
+the model from estimating the channel well enough to decode. Confirmed by the waterfall
+comparison plot (`2026-04-11-waterfall-phase1-v1`).
+
+Fix: rerun with state_dim=56 → see `2026-04-11-moe-phase1-s56-v1`.
