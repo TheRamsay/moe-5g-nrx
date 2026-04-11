@@ -81,9 +81,11 @@ export WANDB_CACHE_DIR="${SCRATCHDIR}/.cache/wandb"
 export RUN_OUTPUT_DIR="${ARTIFACT_DIR}"
 export PYTHONUNBUFFERED=1
 
-# HuggingFace caches must stay on persistent storage, not scratch.
-unset HF_HUB_CACHE HF_DATASETS_CACHE
-export HF_HOME="${HF_HOME:-${HOME}/.cache/huggingface}"
+# HuggingFace caches must stay on persistent storage, not scratch. Override all
+# three variables unconditionally in case the interactive shell inherited bad
+# values from the cluster environment.
+unset HF_HOME HF_HUB_CACHE HF_DATASETS_CACHE
+export HF_HOME="${HOME}/.cache/huggingface"
 export HF_HUB_CACHE="$HF_HOME/hub"
 export HF_DATASETS_CACHE="$HF_HOME/datasets"
 
