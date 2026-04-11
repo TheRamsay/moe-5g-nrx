@@ -14,7 +14,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader, Dataset, IterableDataset
 
-from .constants import TRAIN_ITERATION_SEED_OFFSET
+from .constants import MIXED_PROFILE_SEED_OFFSET, TRAIN_ITERATION_SEED_OFFSET
 
 
 @dataclass(frozen=True)
@@ -160,6 +160,32 @@ class HuggingFaceNRXDataset(Dataset[CachedNRXSample]):
         return "qam16"
 
 
+def _load_hf_torch_dataset(
+    repo_id: str,
+    config: str,
+    split: str,
+    *,
+    max_samples: int | None = None,
+):
+    from datasets import load_dataset
+
+    ds = load_dataset(repo_id, config, split=split)
+    if max_samples is not None and max_samples < len(ds):
+        ds = ds.select(range(max_samples))
+    return ds.with_format("torch")
+
+
+def _cached_batch_from_hf(batch: dict[str, torch.Tensor], *, channel_profile: str) -> CachedNRXBatch:
+    return CachedNRXBatch(
+        inputs=batch["inputs"],
+        bit_labels=batch["bit_labels"],
+        channel_target=batch["channel_target"],
+        snr_db=batch["snr_db"].to(dtype=torch.float32),
+        channel_profile=channel_profile,
+        modulation="qam16",
+    )
+
+
 class HuggingFaceNRXBatchIterableDataset(IterableDataset[CachedNRXBatch]):
     """Batch-native HF dataset wrapper for training.
 
@@ -193,12 +219,12 @@ class HuggingFaceNRXBatchIterableDataset(IterableDataset[CachedNRXBatch]):
 
     def _get_or_create_dataset(self):
         if self._dataset is None:
-            from datasets import load_dataset
-
-            ds = load_dataset(self.repo_id, self.config, split=self.split)
-            if self.max_samples is not None and self.max_samples < len(ds):
-                ds = ds.select(range(self.max_samples))
-            self._dataset = ds.with_format("torch")
+            self._dataset = _load_hf_torch_dataset(
+                self.repo_id,
+                self.config,
+                self.split,
+                max_samples=self.max_samples,
+            )
         return self._dataset
 
     def _iteration_seed(self) -> int | None:
@@ -230,14 +256,104 @@ class HuggingFaceNRXBatchIterableDataset(IterableDataset[CachedNRXBatch]):
         self._iteration_index += 1
 
         for batch in dataset.iter(batch_size=self.batch_size, drop_last_batch=self.drop_last):
-            yield CachedNRXBatch(
-                inputs=batch["inputs"],
-                bit_labels=batch["bit_labels"],
-                channel_target=batch["channel_target"],
-                snr_db=batch["snr_db"].to(dtype=torch.float32),
-                channel_profile=self.config,
-                modulation="qam16",
-            )
+            yield _cached_batch_from_hf(batch, channel_profile=self.config)
+
+
+class HuggingFaceAlternatingBatchIterableDataset(IterableDataset[CachedNRXBatch]):
+    """Single-loader mixed HF training dataset with alternating per-profile batches."""
+
+    def __init__(
+        self,
+        repo_id: str,
+        configs: list[str],
+        split: str,
+        batch_size: int,
+        *,
+        max_samples: int | None = None,
+        drop_last: bool = True,
+        shuffle: bool = True,
+        base_seed: int | None = None,
+    ) -> None:
+        super().__init__()
+        self.repo_id = repo_id
+        self.configs = list(configs)
+        self.split = split
+        self.batch_size = batch_size
+        self.max_samples = max_samples
+        self.drop_last = drop_last
+        self.shuffle = shuffle
+        self.base_seed = base_seed
+        self._datasets: dict[str, object] = {}
+        self._iteration_index = 0
+
+    def _get_or_create_datasets(self) -> dict[str, object]:
+        for config in self.configs:
+            if config not in self._datasets:
+                self._datasets[config] = _load_hf_torch_dataset(
+                    self.repo_id,
+                    config,
+                    self.split,
+                    max_samples=self.max_samples,
+                )
+        return self._datasets
+
+    def _iteration_seed(self) -> int | None:
+        if self.base_seed is None:
+            return None
+        return self.base_seed + self._iteration_index * TRAIN_ITERATION_SEED_OFFSET
+
+    def __len__(self) -> int:
+        total = 0
+        for dataset in self._get_or_create_datasets().values():
+            dataset_len = len(dataset)
+            if self.drop_last:
+                total += dataset_len // self.batch_size
+            else:
+                total += math.ceil(dataset_len / self.batch_size)
+        return total
+
+    @property
+    def num_samples(self) -> int:
+        return sum(len(dataset) for dataset in self._get_or_create_datasets().values())
+
+    @property
+    def num_samples_by_profile(self) -> dict[str, int]:
+        return {profile: len(dataset) for profile, dataset in self._get_or_create_datasets().items()}
+
+    def __iter__(self):
+        worker = torch.utils.data.get_worker_info()
+        worker_id = worker.id if worker is not None else 0
+        num_workers = worker.num_workers if worker is not None else 1
+
+        iteration_seed = self._iteration_seed()
+        datasets = self._get_or_create_datasets()
+        iterators: dict[str, object] = {}
+        active_profiles = list(self.configs)
+
+        for profile_idx, profile in enumerate(self.configs):
+            dataset = datasets[profile]
+            if self.shuffle:
+                profile_seed = (
+                    None if iteration_seed is None else iteration_seed + profile_idx * MIXED_PROFILE_SEED_OFFSET
+                )
+                dataset = dataset.shuffle(seed=profile_seed)
+            if num_workers > 1:
+                dataset = dataset.shard(num_shards=num_workers, index=worker_id, contiguous=True)
+            iterators[profile] = dataset.iter(batch_size=self.batch_size, drop_last_batch=self.drop_last)
+
+        self._iteration_index += 1
+
+        while active_profiles:
+            next_active: list[str] = []
+            for profile in active_profiles:
+                iterator = iterators[profile]
+                try:
+                    batch = next(iterator)
+                except StopIteration:
+                    continue
+                yield _cached_batch_from_hf(batch, channel_profile=profile)
+                next_active.append(profile)
+            active_profiles = next_active
 
 
 def collate_cached_batch(samples: list[CachedNRXSample]) -> CachedNRXBatch:

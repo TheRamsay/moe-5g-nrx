@@ -11,6 +11,7 @@ from omegaconf import DictConfig, open_dict
 from torch.utils.data import DataLoader
 
 from src.data import (
+    HuggingFaceAlternatingBatchIterableDataset,
     HuggingFaceNRXBatchIterableDataset,
     build_dataloader,
     collate_single_cached_batch,
@@ -28,26 +29,6 @@ def _set_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
-class _AlternatingLoader:
-    """Alternates batches between per-profile DataLoaders (matches MixedNRXIterableDataset)."""
-
-    def __init__(self, loaders: dict[str, DataLoader]):
-        self.loaders = loaders
-        self.profiles = list(loaders.keys())
-
-    def __iter__(self):
-        iters = {p: iter(dl) for p, dl in self.loaders.items()}
-        idx = 0
-        while True:
-            profile = self.profiles[idx % len(self.profiles)]
-            try:
-                yield next(iters[profile])
-            except StopIteration:
-                iters[profile] = iter(self.loaders[profile])
-                yield next(iters[profile])
-            idx += 1
-
-
 def _build_hf_train_loader(cfg: DictConfig, hf_repo: str):
     """Build a training loader backed by a HuggingFace dataset."""
     channel_profile = str(cfg.dataset.channel_profile).lower()
@@ -60,20 +41,19 @@ def _build_hf_train_loader(cfg: DictConfig, hf_repo: str):
 
     num_workers = int(cfg.training.get("hf_num_workers", 2))
     prefetch_factor = int(cfg.training.get("hf_prefetch_factor", 1))
-    total_workers = num_workers * len(profiles)
+    total_workers = num_workers if len(profiles) > 1 else num_workers
 
     print(
         "[INFO] HF train loader config: "
         f"repo={hf_repo} profiles={profiles} batch_size={batch_size} "
-        f"per_profile_workers={num_workers} total_workers={total_workers} "
+        f"workers={num_workers} total_workers={total_workers} "
         f"prefetch_factor={prefetch_factor}"
     )
 
-    loaders = {}
-    for profile in profiles:
-        ds = HuggingFaceNRXBatchIterableDataset(
+    if len(profiles) > 1:
+        ds = HuggingFaceAlternatingBatchIterableDataset(
             hf_repo,
-            profile,
+            profiles,
             "train",
             batch_size=batch_size,
             drop_last=True,
@@ -81,9 +61,10 @@ def _build_hf_train_loader(cfg: DictConfig, hf_repo: str):
             base_seed=int(cfg.runtime.seed),
         )
         print(
-            f"[INFO] HF training dataset: {hf_repo}/{profile}/train ({ds.num_samples} samples, {len(ds)} batches/epoch)"
+            f"[INFO] HF training dataset: {hf_repo}/mixed/train "
+            f"({ds.num_samples} samples total, {len(ds)} batches/epoch, per_profile={ds.num_samples_by_profile})"
         )
-        loaders[profile] = DataLoader(
+        return DataLoader(
             ds,
             batch_size=None,
             num_workers=num_workers,
@@ -93,9 +74,26 @@ def _build_hf_train_loader(cfg: DictConfig, hf_repo: str):
             prefetch_factor=prefetch_factor if num_workers > 0 else None,
         )
 
-    if len(loaders) == 1:
-        return next(iter(loaders.values()))
-    return _AlternatingLoader(loaders)
+    profile = profiles[0]
+    ds = HuggingFaceNRXBatchIterableDataset(
+        hf_repo,
+        profile,
+        "train",
+        batch_size=batch_size,
+        drop_last=True,
+        shuffle=True,
+        base_seed=int(cfg.runtime.seed),
+    )
+    print(f"[INFO] HF training dataset: {hf_repo}/{profile}/train ({ds.num_samples} samples, {len(ds)} batches/epoch)")
+    return DataLoader(
+        ds,
+        batch_size=None,
+        num_workers=num_workers,
+        pin_memory=True,
+        collate_fn=collate_single_cached_batch,
+        persistent_workers=num_workers > 0,
+        prefetch_factor=prefetch_factor if num_workers > 0 else None,
+    )
 
 
 def _build_train_loader(cfg: DictConfig):
