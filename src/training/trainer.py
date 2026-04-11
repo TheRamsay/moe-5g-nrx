@@ -557,6 +557,27 @@ class Trainer:
             load_balance_penalty = torch.mean((mean_probs - uniform_probs) ** 2)
             final_loss = final_loss + load_balance_beta * load_balance_penalty
 
+        # Switch Transformer auxiliary loss: n_experts * sum(f_i * P_i)
+        # f_i = fraction of tokens hard-routed to expert i (detached)
+        # P_i = mean soft router probability for expert i (differentiable)
+        switch_aux_weight = float(compute_cfg.get("switch_aux_weight", 0.0))
+        if switch_aux_weight > 0.0 and "router_probs" in outputs and "selected_expert_index" in outputs:
+            rp = outputs["router_probs"]  # [batch, n_experts]
+            sel = outputs["selected_expert_index"]  # [batch]
+            n_exp = rp.shape[-1]
+            f = torch.stack([(sel == i).float().mean() for i in range(n_exp)]).detach()
+            P = rp.mean(dim=0)
+            final_loss = final_loss + switch_aux_weight * n_exp * (f * P).sum()
+
+        # Soft capacity penalty: penalise any expert exceeding capacity_factor / n_experts
+        # capacity_factor=1.5 → max 50% per expert for 3 experts
+        capacity_weight = float(compute_cfg.get("capacity_weight", 0.0))
+        capacity_factor = float(compute_cfg.get("capacity_factor", 1.5))
+        if capacity_weight > 0.0 and "router_probs" in outputs:
+            mean_probs = outputs["router_probs"].mean(dim=0)
+            max_allowed = capacity_factor / max(mean_probs.numel(), 1)
+            final_loss = final_loss + capacity_weight * torch.clamp(mean_probs - max_allowed, min=0.0).sum()
+
         intermediate_logits = outputs["intermediate_logits"]
         intermediate_channel_estimates = outputs["intermediate_channel_estimates"]
         if not intermediate_logits or not intermediate_channel_estimates:

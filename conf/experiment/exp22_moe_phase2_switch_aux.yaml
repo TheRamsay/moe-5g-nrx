@@ -1,0 +1,55 @@
+# @package _global_
+# Experiment 22: MoE Phase 2 — Switch Transformer auxiliary loss
+#
+# Phase 2 v1 (beta=0.1) showed full router collapse (large=100%).
+# The existing load balance loss uses MSE(mean_probs, uniform).
+# Switch Transformer uses: L_aux = n_experts * sum(f_i * P_i)
+# where f_i = hard-routed fraction (detached) and P_i = mean soft prob.
+# This directly penalises correlation between actual load and router confidence,
+# which is the exact failure mode we see (f_large=1, P_large=1).
+#
+# switch_aux_weight=0.01 matches the alpha used in the Switch Transformer paper.
+# load_balance_beta=0.0 to isolate Switch aux mechanism cleanly.
+
+defaults:
+  - override /model: moe_nl
+  - override /dataset: mixed
+
+experiment:
+  batch_name: moe-phase2-beta-sweep-v1
+  exp_name: moe_phase2_switch_aux_w0p01_s67
+  tags: [moe, phase2, warm-start, staged, compute-aware, hf, simo-1x4, 16qam, nl-range, switch-aux]
+  notes: >
+    Phase 2 with Switch Transformer auxiliary loss (weight=0.01).
+    Replaces MSE load balance with n_experts*sum(f_i*P_i).
+    load_balance_beta=0 to isolate. Compare against beta sweep and capacity runs.
+  study_slug: 2026-04-11-moe-phase2-beta-sweep-v1
+  study_path: experiments/2026-04-11-moe-phase2-beta-sweep-v1
+  question: Does the Switch Transformer aux loss prevent router collapse vs MSE load balance?
+
+model:
+  compute:
+    flops_penalty_alpha: 1e-3
+    load_balance_beta: 0.0
+    switch_aux_weight: 0.01
+
+training:
+  hf_dataset: Vack0/moe-5g-nrx
+  batch_size: 128
+  hf_num_workers: 4
+  hf_prefetch_factor: 1
+  learning_rate: 1e-3
+  weight_decay: 1e-4
+  max_steps: 6000
+  freeze_experts: true
+  unfreeze_experts_at_step: 2000
+  warm_start:
+    stem_checkpoint: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best"
+    experts:
+      nano: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_nano_final20k_constant_lr_s67-aos4hhid:best"
+      small: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_small_final20k_constant_lr_s67-kivdz4qu:best"
+      large: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best"
+
+validation:
+  every_n_steps: 500
+  snr_bins: 5
