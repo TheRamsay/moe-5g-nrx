@@ -1,0 +1,53 @@
+# @package _global_
+# Experiment 20: MoE Phase 2 — load_balance_beta sweep
+#
+# Phase 2 (beta=0.1) showed full router collapse: large=100% throughout.
+# The warm-started large expert dominates because beta=0.1 is too weak to
+# redistribute traffic. This sweep tests beta=0.5/1.0/2.0 to find the
+# regime where routing diversity recovers without destroying BLER.
+#
+# Short runs (6k steps: 2k frozen + 4k joint) — enough to observe whether
+# router entropy recovers after unfreezing.
+# Override at submission: model.compute.load_balance_beta=X experiment.exp_name=moe_phase2_bX_s67
+
+defaults:
+  - override /model: moe_nl
+  - override /dataset: mixed
+
+experiment:
+  batch_name: moe-phase2-beta-sweep-v1
+  exp_name: moe_phase2_beta_sweep_s67  # override per run
+  tags: [moe, phase2, warm-start, staged, compute-aware, hf, simo-1x4, 16qam, nl-range, beta-sweep]
+  notes: >
+    Beta sweep for Phase 2 warm-start + staged training. Phase 2 v1 (beta=0.1)
+    showed full router collapse (large=100%). Testing beta=0.5/1.0/2.0 to find
+    the load balance strength that recovers routing diversity.
+  study_slug: 2026-04-11-moe-phase2-beta-sweep-v1
+  study_path: experiments/2026-04-11-moe-phase2-beta-sweep-v1
+  question: What beta recovers routing diversity in warm-started Phase 2 without collapsing BLER?
+
+model:
+  compute:
+    flops_penalty_alpha: 1e-3
+    load_balance_beta: 1.0  # override per run: 0.5 / 1.0 / 2.0
+
+training:
+  hf_dataset: Vack0/moe-5g-nrx
+  batch_size: 128
+  hf_num_workers: 4
+  hf_prefetch_factor: 1
+  learning_rate: 1e-3
+  weight_decay: 1e-4
+  max_steps: 6000
+  freeze_experts: true
+  unfreeze_experts_at_step: 2000
+  warm_start:
+    stem_checkpoint: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best"
+    experts:
+      nano: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_nano_final20k_constant_lr_s67-aos4hhid:best"
+      small: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_small_final20k_constant_lr_s67-kivdz4qu:best"
+      large: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best"
+
+validation:
+  every_n_steps: 500
+  snr_bins: 5
