@@ -60,8 +60,7 @@ footing across all three expert sizes (study: `2026-04-05-dense-small-mid-finali
 
 - Default MetaCentrum path is through `scripts/metacentrum_job.sh` and the study `submit.sh` helpers.
 - Resource presets live in `experiments/resources/`.
-- **MoE runs require `gpu-46gb.sh`** — training runs all 3 experts simultaneously (soft gating), 16 GB OOMs.
-- Dense runs can use `gpu-16gb.sh`.
+- **Do NOT specify `gpu_mem` in qsub** — model uses ~6GB VRAM, constraining GPU class only hurts queue time. Just request `ngpus=1` and let the scheduler assign whatever is free.
 - For batch runs, checkpoints should go to `../artifacts/checkpoints` so they are synced back from scratch.
 
 ## MoE Direction
