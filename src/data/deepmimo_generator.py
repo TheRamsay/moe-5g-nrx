@@ -37,7 +37,6 @@ class DeepMIMOGenerationConfig:
     user_subsampling: float = 1.0
     num_paths: int = 10
     use_all_rows_if_unspecified: bool = True
-    allow_replacement_when_insufficient: bool = True
 
 
 def _flatten_channel_blocks(channels: Any) -> list[np.ndarray]:
@@ -378,7 +377,7 @@ def _load_channels_from_deepmimo(cfg: DeepMIMOGenerationConfig) -> tuple[np.ndar
     block_sizes = [block.shape[0] for block in blocks]
     total_samples = int(sum(block_sizes))
     sampling_with_replacement = total_samples < cfg.num_samples
-    if sampling_with_replacement and not cfg.allow_replacement_when_insufficient:
+    if sampling_with_replacement:
         raise ValueError(
             f"DeepMIMO scenario provides {total_samples} samples, required {cfg.num_samples}. "
             "Adjust generation.num_samples or scenario/trim configuration "

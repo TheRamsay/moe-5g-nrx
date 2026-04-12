@@ -106,7 +106,6 @@ generation:
         user_subsampling: 1.0
         num_paths: 10
         use_all_rows_if_unspecified: true
-        allow_replacement_when_insufficient: true
         snr_db_min: ${dataset.snr_db.min}
         snr_db_max: ${dataset.snr_db.max}
         estimation_noise_std: ${dataset.estimation_noise_std}
