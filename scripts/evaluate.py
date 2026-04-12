@@ -448,16 +448,28 @@ def print_results(results: dict[str, Any], dataset_name: str) -> None:
             )
 
 
+def _resolve_profile_dataset_path(data_dir: Path, profile: str) -> Path:
+    file_candidate = data_dir / f"{profile}.pt"
+    dir_candidate = data_dir / profile
+    if file_candidate.exists():
+        return file_candidate
+    if dir_candidate.exists():
+        return dir_candidate
+    if profile.lower() == "deepmimo":
+        return dir_candidate
+    return file_candidate
+
+
 def _resolve_datasets(eval_cfg: DictConfig, checkpoint_cfg: dict[str, Any]) -> list[tuple[str, Path]]:
     profile_list = eval_cfg.get("profiles")
     if profile_list:
         data_dir = Path(to_absolute_path(str(eval_cfg.get("data_dir", PROJECT_ROOT / "data" / "test"))))
-        return [(str(profile), data_dir / f"{profile}.pt") for profile in profile_list]
+        return [(str(profile), _resolve_profile_dataset_path(data_dir, str(profile))) for profile in profile_list]
 
     if bool(eval_cfg.get("all_profiles", False)):
-        profiles = ["uma", "tdlc", "mixed"]
+        profiles = ["uma", "tdlc", "mixed", "deepmimo"]
         data_dir = Path(to_absolute_path(str(eval_cfg.get("data_dir", PROJECT_ROOT / "data" / "test"))))
-        return [(profile, data_dir / f"{profile}.pt") for profile in profiles]
+        return [(profile, _resolve_profile_dataset_path(data_dir, profile)) for profile in profiles]
 
     default_dataset = eval_cfg.get("dataset_path")
     if default_dataset is None:
@@ -479,7 +491,13 @@ def _resolve_dataset_with_artifact(cfg: DictConfig, dataset_name: str, local_pat
         artifact_ref = f"{entity}/{artifact_ref}"
 
     try:
-        artifact_path = use_artifact_path(artifact_ref, expected_filename=local_path.name)
+        expected_filename = local_path.name if local_path.suffix else None
+        expected_dirname = local_path.name if not local_path.suffix else None
+        artifact_path = use_artifact_path(
+            artifact_ref,
+            expected_filename=expected_filename,
+            expected_dirname=expected_dirname,
+        )
         wandb.run.summary[f"artifacts/dataset/{dataset_name}"] = artifact_ref
         print(f"[INFO] Using dataset artifact for {dataset_name}: {artifact_ref}")
         return artifact_path

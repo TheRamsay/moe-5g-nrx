@@ -149,6 +149,20 @@ uv run python scripts/generate_datasets.py generation.output_dir=data2
 
 Datasets are saved to `data/val/` and `data/test/` (gitignored).
 
+DeepMIMO OOD datasets are generated separately in Arrow format:
+
+```bash
+uv run python scripts/generate_deepmimo_dataset.py \
+    generation.split=test \
+    generation.num_samples=32768 \
+    generation.deepmimo.dataset_folder=$HOME/Raytracing_scenarios \
+    generation.deepmimo.scenario=asu_campus_3p5 \
+    generation.deepmimo.profile_name=deepmimo
+```
+
+This produces `data/test/deepmimo/` (directory), logs `dataset-test-deepmimo`,
+and can be consumed directly by `scripts/evaluate.py`.
+
 ### Training Modes
 
 Train on a single channel profile or mixed (alternating UMa/TDL-C):
@@ -213,6 +227,11 @@ uv run python scripts/evaluate.py \
     evaluation.checkpoint_artifact=knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best \
     evaluation.profiles=[uma,tdlc]
 
+# Evaluate OOD DeepMIMO only (Arrow dataset artifact: dataset-test-deepmimo)
+uv run python scripts/evaluate.py \
+    evaluation.checkpoint_artifact=knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best \
+    evaluation.profiles=[deepmimo]
+
 # Evaluate one explicit dataset
 uv run python scripts/evaluate.py \
     evaluation.checkpoint_artifact=knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best \
@@ -259,6 +278,13 @@ uv run python scripts/generate_datasets.py generation.split=val generation.num_s
 # Generate cached test datasets once and reuse them across runs
 uv run python scripts/generate_datasets.py generation.split=test generation.num_samples=32768
 
+# Generate cached DeepMIMO OOD test dataset (Arrow directory)
+uv run python scripts/generate_deepmimo_dataset.py \
+    generation.split=test generation.num_samples=32768 \
+    generation.deepmimo.dataset_folder=$HOME/Raytracing_scenarios \
+    generation.deepmimo.scenario=asu_campus_3p5 \
+    generation.deepmimo.profile_name=deepmimo
+
 # Train and log the final checkpoint as a model artifact
 uv run python main.py experiment=exp01_baseline
 
@@ -270,6 +296,11 @@ uv run python scripts/evaluate.py evaluation.checkpoint=checkpoints/static_dense
 uv run python scripts/evaluate.py \
     evaluation.checkpoint_artifact=your-entity/moe-5g-nrx/model-<exp-name>-<run-id>:latest \
     evaluation.profiles=[uma,tdlc]
+
+# Evaluate ID + OOD in one run
+uv run python scripts/evaluate.py \
+    evaluation.checkpoint_artifact=your-entity/moe-5g-nrx/model-<exp-name>-<run-id>:latest \
+    evaluation.profiles=[uma,tdlc,deepmimo]
 
 # Use the best validation checkpoint artifact instead of the final one
 uv run python scripts/evaluate.py \
