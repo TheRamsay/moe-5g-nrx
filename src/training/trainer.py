@@ -31,8 +31,20 @@ class Trainer:
         self.device = self._resolve_device(str(cfg.runtime.device))
         self.use_wandb = setup_wandb(cfg, job_id=job_id, job_type="train")
         self.model = self._build_model()
-        self._apply_warm_start()
-        self._apply_freeze_config()
+
+        resume_ckpt = self._load_resume_checkpoint()
+        if resume_ckpt is not None:
+            self.model.load_state_dict(resume_ckpt["model_state_dict"])
+            self.global_step = int(resume_ckpt["global_step"])
+            print(f"[RESUME] loaded checkpoint from step {self.global_step}")
+        else:
+            self._apply_warm_start()
+            self.global_step = 0
+
+        unfreeze_at = int(cfg.training.get("unfreeze_experts_at_step", 0))
+        if self.global_step < unfreeze_at:
+            self._apply_freeze_config()
+
         self.model = self.model.to(self.device)
         self.num_parameters = sum(parameter.numel() for parameter in self.model.parameters())
         self._amp_dtype = self._resolve_amp_dtype(cfg.training.get("mixed_precision"))
@@ -55,10 +67,24 @@ class Trainer:
             lr=float(cfg.training.learning_rate),
             weight_decay=float(cfg.training.weight_decay),
         )
+
+        if resume_ckpt is not None:
+            try:
+                self.optimizer.load_state_dict(resume_ckpt["optimizer_state_dict"])
+                for state in self.optimizer.state.values():
+                    for v in state.values():
+                        if isinstance(v, torch.Tensor):
+                            v.data = v.data.to(self.device)
+                print("[RESUME] restored optimizer state")
+            except (ValueError, KeyError):
+                print("[RESUME] optimizer state mismatch, using fresh optimizer")
+            scaler_sd = resume_ckpt.get("grad_scaler_state_dict")
+            if scaler_sd and self.grad_scaler.is_enabled():
+                self.grad_scaler.load_state_dict(scaler_sd)
+
         self.scheduler: torch.optim.lr_scheduler.LRScheduler | None = None
         self.loss_fn = torch.nn.BCEWithLogitsLoss()
         self.channel_loss_fn = torch.nn.MSELoss()
-        self.global_step = 0
         self._val_dataloaders: dict[str, DataLoader] = {}
         self._best_checkpoint_score: float | None = None
         self._train_metrics_ema_alpha = float(cfg.logging.get("train_metrics_ema_alpha", 0.1))
@@ -136,8 +162,11 @@ class Trainer:
     def train(self, train_loader, num_steps: int) -> None:
         """Main training loop with periodic metric logging and validation."""
         data_iterator = iter(train_loader)
-        progress = tqdm(total=num_steps, desc="train", dynamic_ncols=True)
+        progress = tqdm(total=num_steps, initial=self.global_step, desc="train", dynamic_ncols=True)
         self.scheduler = self._build_scheduler(num_steps)
+        if self.scheduler is not None and self.global_step > 0:
+            for _ in range(self.global_step):
+                self.scheduler.step()
 
         val_enabled = bool(self._val_dataloaders)
         val_every_n = int(self.cfg.validation.every_n_steps) if val_enabled else 0
@@ -228,7 +257,7 @@ class Trainer:
                 and self.global_step % checkpoint_every_n == 0
             ):
                 latest_path = self._checkpoint_dir() / f"{self.cfg.model.name}_latest.pt"
-                self.save_checkpoint(str(latest_path), log_artifact=False, checkpoint_kind="latest")
+                self.save_checkpoint(str(latest_path), log_artifact=True, checkpoint_kind="latest")
                 print(f"  [CKPT] step={self.global_step} latest -> {latest_path}")
 
             if overfit_enabled and self.global_step >= overfit_min_steps and metrics["loss"] <= overfit_stop_loss:
@@ -365,6 +394,27 @@ class Trainer:
 
         raise ValueError(f"Unsupported training.scheduler.name: {scheduler_name}")
 
+    def _load_resume_checkpoint(self) -> dict[str, Any] | None:
+        """Load a full training checkpoint for resumption if configured."""
+        resume_source = str(self.cfg.training.get("resume_from", "") or "")
+        if not resume_source:
+            return None
+
+        path = Path(resume_source)
+        if not path.exists():
+            import wandb as _wandb
+
+            api = _wandb.Api()
+            artifact = api.artifact(resume_source)
+            artifact_dir = Path(artifact.download())
+            pt_files = sorted(artifact_dir.glob("*.pt"))
+            if not pt_files:
+                raise FileNotFoundError(f"No .pt file in resume artifact {resume_source!r}")
+            path = pt_files[0]
+
+        ckpt: dict[str, Any] = torch.load(path, map_location="cpu", weights_only=False)
+        return ckpt
+
     def _apply_warm_start(self) -> None:
         """Load dense checkpoint weights into MoE stem and expert branches if configured."""
         warm_cfg = self.cfg.training.get("warm_start")
@@ -394,7 +444,7 @@ class Trainer:
             param.requires_grad_(False)
         frozen = sum(p.numel() for p in self.model.experts.parameters())
         total = sum(p.numel() for p in self.model.parameters())
-        print(f"[INFO] Frozen {frozen:,} expert params " f"({100 * frozen / max(total, 1):.1f}% of {total:,} total)")
+        print(f"[INFO] Frozen {frozen:,} expert params ({100 * frozen / max(total, 1):.1f}% of {total:,} total)")
 
     def _unfreeze_experts(self) -> None:
         """Unfreeze expert parameters and add them to the optimizer (Stage 2C transition)."""
