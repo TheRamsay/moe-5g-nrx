@@ -96,6 +96,18 @@ generation:
     base_seed: 67
     log_to_wandb: true
     artifact_aliases: [latest]
+    deepmimo:
+        scenario: null
+        dataset_folder: ./data/deepmimov3/
+        active_users_only: true
+        active_bs: [1]
+        user_rows: null
+        user_subsampling: 1.0
+        num_paths: 10
+        use_all_rows_if_unspecified: true
+        snr_db_min: ${dataset.snr_db.min}
+        snr_db_max: ${dataset.snr_db.max}
+        estimation_noise_std: ${dataset.estimation_noise_std}
 
 reporting:
     create_wandb_report: true

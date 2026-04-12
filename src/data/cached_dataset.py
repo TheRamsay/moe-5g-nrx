@@ -160,6 +160,69 @@ class HuggingFaceNRXDataset(Dataset[CachedNRXSample]):
         return "qam16"
 
 
+class LocalArrowNRXDataset(Dataset[CachedNRXSample]):
+    """PyTorch MapDataset backed by a local Arrow dataset directory."""
+
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        max_samples: int | None = None,
+    ) -> None:
+        from datasets import load_from_disk
+
+        self.path = Path(path)
+        if not self.path.exists() or not self.path.is_dir():
+            raise FileNotFoundError(f"Local Arrow dataset directory not found: {self.path}")
+
+        ds = load_from_disk(str(self.path))
+        required_columns = {"inputs", "bit_labels", "channel_target", "snr_db"}
+        missing = required_columns - set(ds.column_names)
+        if missing:
+            raise ValueError(f"Arrow dataset missing required columns: {missing}")
+
+        if max_samples is not None and max_samples < len(ds):
+            ds = ds.select(range(max_samples))
+
+        self._ds = ds.with_format("torch")
+        self._channel_profile = self.path.name
+        self._modulation = "qam16"
+        if len(self._ds) > 0:
+            first_row = self._ds[0]
+            profile_value = first_row.get("channel_profile")
+            modulation_value = first_row.get("modulation")
+            if profile_value is not None:
+                self._channel_profile = str(profile_value)
+            if modulation_value is not None:
+                self._modulation = str(modulation_value)
+
+    def __len__(self) -> int:
+        return len(self._ds)
+
+    def __getitem__(self, idx: int) -> CachedNRXSample:
+        row = self._ds[idx]
+        return CachedNRXSample(
+            inputs=row["inputs"],
+            bit_labels=row["bit_labels"],
+            channel_target=row["channel_target"],
+            snr_db=float(row["snr_db"]),
+            channel_profile=self._channel_profile,
+            modulation=self._modulation,
+        )
+
+    @property
+    def num_samples(self) -> int:
+        return len(self._ds)
+
+    @property
+    def channel_profile(self) -> str:
+        return self._channel_profile
+
+    @property
+    def modulation(self) -> str:
+        return self._modulation
+
+
 class HuggingFaceNRXBatchIterableDataset(IterableDataset[CachedNRXBatch]):
     """Batch-native HF dataset wrapper for training.
 
@@ -272,10 +335,10 @@ def build_cached_dataloader(
     pin_memory: bool = False,
     shuffle: bool = False,
 ) -> DataLoader:
-    """Build a DataLoader for a cached dataset (.pt file or HuggingFace).
+    """Build a DataLoader for a cached dataset (.pt, local Arrow dir, or HuggingFace).
 
-    Provide either ``path`` for a local .pt file, or ``hf_repo``/``hf_config``/``hf_split``
-    for a HuggingFace dataset.
+    Provide either ``path`` for a local cache path (.pt file or Arrow directory), or
+    ``hf_repo``/``hf_config``/``hf_split`` for a HuggingFace dataset.
     """
     if hf_repo is not None:
         dataset: Dataset[CachedNRXSample] = HuggingFaceNRXDataset(
@@ -285,9 +348,13 @@ def build_cached_dataloader(
             max_samples=max_samples,
         )
     elif path is not None:
-        dataset = CachedNRXDataset(path, max_samples=max_samples)
+        path_obj = Path(path)
+        if path_obj.is_dir():
+            dataset = LocalArrowNRXDataset(path_obj, max_samples=max_samples)
+        else:
+            dataset = CachedNRXDataset(path_obj, max_samples=max_samples)
     else:
-        raise ValueError("Provide either path (for .pt) or hf_repo (for HuggingFace)")
+        raise ValueError("Provide either path (.pt or Arrow directory) or hf_repo (for HuggingFace)")
 
     return DataLoader(
         dataset,

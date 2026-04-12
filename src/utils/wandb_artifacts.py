@@ -98,6 +98,11 @@ def log_dataset_artifact(
         return None
 
     path = Path(dataset_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Dataset path not found: {path}")
+
+    is_directory = path.is_dir()
+    dataset_format = "arrow_dir" if is_directory else "pt_file"
     artifact_name = build_dataset_artifact_name(split, profile)
     artifact = wandb.Artifact(
         artifact_name,
@@ -107,10 +112,14 @@ def log_dataset_artifact(
             "split": split,
             "profile": profile,
             "path": str(path),
+            "format": dataset_format,
             **metadata,
         },
     )
-    artifact.add_file(str(path), name=path.name)
+    if is_directory:
+        artifact.add_dir(str(path), name=path.name)
+    else:
+        artifact.add_file(str(path), name=path.name)
     alias_list = aliases or ["latest"]
     wandb.log_artifact(artifact, aliases=alias_list)
     ref = _artifact_ref(wandb.run.project, wandb.run.entity, artifact_name, alias_list[0])
@@ -169,7 +178,12 @@ def log_checkpoint_artifact(
     return ref
 
 
-def use_artifact_path(artifact_ref: str, *, expected_filename: str | None = None) -> Path:
+def use_artifact_path(
+    artifact_ref: str,
+    *,
+    expected_filename: str | None = None,
+    expected_dirname: str | None = None,
+) -> Path:
     if wandb.run is None:
         raise RuntimeError("wandb.run is required to use artifacts")
 
@@ -179,8 +193,23 @@ def use_artifact_path(artifact_ref: str, *, expected_filename: str | None = None
         candidate = download_dir / expected_filename
         if candidate.exists():
             return candidate
+        recursive_file_matches = [path for path in download_dir.rglob(expected_filename) if path.is_file()]
+        if len(recursive_file_matches) == 1:
+            return recursive_file_matches[0]
+
+    if expected_dirname is not None:
+        candidate = download_dir / expected_dirname
+        if candidate.is_dir():
+            return candidate
+        recursive_dir_matches = [path for path in download_dir.rglob(expected_dirname) if path.is_dir()]
+        if len(recursive_dir_matches) == 1:
+            return recursive_dir_matches[0]
 
     files = [path for path in download_dir.iterdir() if path.is_file()]
-    if len(files) == 1:
+    directories = [path for path in download_dir.iterdir() if path.is_dir()]
+    if len(files) == 1 and not directories:
         return files[0]
-    raise FileNotFoundError(f"Unable to resolve downloaded artifact file in {download_dir}")
+    if len(directories) == 1 and not files:
+        return directories[0]
+
+    raise FileNotFoundError(f"Unable to resolve downloaded artifact payload in {download_dir}")
