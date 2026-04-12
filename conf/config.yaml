@@ -36,6 +36,7 @@ training:
         min_lr: 0.0
     gradient_clip_norm: 1.0
     max_steps: 10000
+    resume_from: null      # local path or W&B artifact ref to resume training from
     overfit_single_batch: false
     overfit_stop_loss: 0.01
     overfit_min_steps: 100
