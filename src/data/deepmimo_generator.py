@@ -271,6 +271,29 @@ def _extract_deepmimov3_channel_blocks(dataset: Any) -> list[np.ndarray]:
     return blocks
 
 
+def _infer_rows_from_user_grids(user_grids_raw: Any) -> tuple[int, ...] | None:
+    user_grids = np.asarray(user_grids_raw, dtype=np.int64)
+    if user_grids.ndim == 1:
+        user_grids = user_grids.reshape(1, -1)
+    if user_grids.shape[1] < 2:
+        return None
+
+    rows: set[int] = set()
+    for grid_spec in user_grids:
+        start_row = int(grid_spec[0]) - 1
+        end_row = int(grid_spec[1]) - 1
+        if end_row < start_row:
+            continue
+        if end_row < 0:
+            continue
+        start_row = max(start_row, 0)
+        rows.update(range(start_row, end_row + 1))
+
+    if not rows:
+        return None
+    return tuple(sorted(rows))
+
+
 def _infer_deepmimov3_all_user_rows(dataset_folder: str, scenario: str) -> tuple[int, ...] | None:
     try:
         import scipy.io
@@ -290,18 +313,7 @@ def _infer_deepmimov3_all_user_rows(dataset_folder: str, scenario: str) -> tuple
     user_grids_raw = payload.get("user_grids")
     if user_grids_raw is None:
         return None
-
-    user_grids = np.asarray(user_grids_raw, dtype=np.int64)
-    if user_grids.ndim == 1:
-        user_grids = user_grids.reshape(1, -1)
-    if user_grids.shape[1] < 2:
-        return None
-
-    min_row = max(int(user_grids[:, 0].min()) - 1, 0)
-    max_row = int(user_grids[:, 1].max()) - 1
-    if max_row < min_row:
-        return None
-    return tuple(range(min_row, max_row + 1))
+    return _infer_rows_from_user_grids(user_grids_raw)
 
 
 def _load_channels_from_deepmimo_v3(cfg: DeepMIMOGenerationConfig) -> list[np.ndarray]:
