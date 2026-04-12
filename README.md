@@ -159,10 +159,10 @@ uv run python scripts/generate_deepmimo_dataset.py \
     generation.deepmimo.profile_name=deepmimo
 ```
 
-This produces `data/test/deepmimo/` (directory), logs `dataset-test-deepmimo`,
+This produces `data/test/asu_campus1` (directory), logs `dataset-test-deepmimo`,
 and can be consumed directly by `scripts/evaluate.py`.
-If a scenario has fewer unique channels than requested samples, the generator
-automatically resamples channels with replacement to still produce the exact sample count.
+When generating deepmimo dataset scenario must be present in `data/deepmimov3/`.
+Currently the script supports only deepmimov3.
 
 ### Training Modes
 

@@ -99,7 +99,6 @@ generation:
     deepmimo:
         scenario: null
         dataset_folder: ./data/deepmimov3/
-        profile_name: deepmimo
         active_users_only: true
         active_bs: [1]
         user_rows: null

@@ -62,7 +62,9 @@ def _log_dataset_to_wandb(
 def main(cfg: DictConfig) -> None:
     generation_cfg = cfg.generation
     deepmimo_cfg = generation_cfg.get("deepmimo", {})
-    profile_name = str(deepmimo_cfg.get("profile_name", "deepmimo"))
+    profile_name = str(deepmimo_cfg.get("scenario"))
+    if not profile_name or profile_name.strip() == "":
+        raise ValueError("DeepMIMO scenario name must be provided in generation.deepmimo.scenario")
     scenario = deepmimo_cfg.get("scenario")
     if scenario is None or str(scenario).strip() == "":
         raise ValueError("generation.deepmimo.scenario must be set (scenario name or absolute path).")

@@ -339,37 +339,8 @@ def _load_channels_from_deepmimo_v3(cfg: DeepMIMOGenerationConfig) -> list[np.nd
     return blocks
 
 
-def _load_channels_from_deepmimo_v4(cfg: DeepMIMOGenerationConfig) -> list[np.ndarray]:
-    import deepmimo as dm
-
-    scenario_path = Path(cfg.scenario)
-    if cfg.download_if_missing and not scenario_path.is_absolute():
-        dm.download(cfg.scenario)
-
-    dataset = dm.load(cfg.scenario)
-    if cfg.active_users_only:
-        try:
-            dataset = dataset.trim(idxs_mode="active")
-        except Exception:
-            pass
-
-    raw_channels = dataset.compute_channels()
-    blocks = [_to_four_dim_channel_block(block) for block in _flatten_channel_blocks(raw_channels)]
-    if not blocks:
-        raise ValueError("DeepMIMO returned no channel blocks.")
-    return blocks
-
-
 def _load_channels_from_deepmimo(cfg: DeepMIMOGenerationConfig) -> tuple[np.ndarray, np.ndarray, int, bool]:
-    try:
-        blocks = _load_channels_from_deepmimo_v3(cfg)
-    except ImportError:
-        try:
-            blocks = _load_channels_from_deepmimo_v4(cfg)
-        except ImportError as exc:  # pragma: no cover - optional dependency path
-            raise RuntimeError(
-                "Missing DeepMIMO dependency. Install DeepMIMOv3 (py3.10) or deepmimo (py3.11+)."
-            ) from exc
+    blocks = _load_channels_from_deepmimo_v3(cfg)
 
     if not blocks:
         raise ValueError("DeepMIMO returned no channel blocks.")
