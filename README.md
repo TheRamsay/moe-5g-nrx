@@ -155,13 +155,14 @@ DeepMIMO OOD datasets are generated separately in Arrow format:
 uv run python scripts/generate_deepmimo_dataset.py \
     generation.split=test \
     generation.num_samples=32768 \
-    generation.deepmimo.dataset_folder=$HOME/Raytracing_scenarios \
-    generation.deepmimo.scenario=asu_campus_3p5 \
+    generation.deepmimo.scenario=asu_campus1 \
     generation.deepmimo.profile_name=deepmimo
 ```
 
 This produces `data/test/deepmimo/` (directory), logs `dataset-test-deepmimo`,
 and can be consumed directly by `scripts/evaluate.py`.
+If a scenario has fewer unique channels than requested samples, the generator
+automatically resamples channels with replacement to still produce the exact sample count.
 
 ### Training Modes
 
@@ -281,8 +282,7 @@ uv run python scripts/generate_datasets.py generation.split=test generation.num_
 # Generate cached DeepMIMO OOD test dataset (Arrow directory)
 uv run python scripts/generate_deepmimo_dataset.py \
     generation.split=test generation.num_samples=32768 \
-    generation.deepmimo.dataset_folder=$HOME/Raytracing_scenarios \
-    generation.deepmimo.scenario=asu_campus_3p5 \
+    generation.deepmimo.scenario=asu_campus1 \
     generation.deepmimo.profile_name=deepmimo
 
 # Train and log the final checkpoint as a model artifact

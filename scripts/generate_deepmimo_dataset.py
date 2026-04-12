@@ -122,11 +122,13 @@ def main(cfg: DictConfig) -> None:
             modulation=str(cfg.dataset.modulation),
             download_if_missing=bool(deepmimo_cfg.get("download_if_missing", True)),
             active_users_only=bool(deepmimo_cfg.get("active_users_only", True)),
-            dataset_folder=str(deepmimo_cfg.get("dataset_folder", "./Raytracing_scenarios")),
+            dataset_folder=str(deepmimo_cfg.get("dataset_folder", "./data/deepmimov3/")),
             active_bs=tuple(int(x) for x in deepmimo_cfg.get("active_bs", [1])),
             user_rows=user_rows,
             user_subsampling=float(deepmimo_cfg.get("user_subsampling", 1.0)),
             num_paths=int(deepmimo_cfg.get("num_paths", 10)),
+            use_all_rows_if_unspecified=bool(deepmimo_cfg.get("use_all_rows_if_unspecified", True)),
+            allow_replacement_when_insufficient=bool(deepmimo_cfg.get("allow_replacement_when_insufficient", True)),
         )
         metadata = generate_deepmimo_arrow_dataset(generator_cfg, output_path)
         print(f"  Saved Arrow dataset: {output_path} ({metadata['num_samples']} samples)")

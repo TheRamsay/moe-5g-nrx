@@ -7,7 +7,6 @@ requires-python = ">=3.10,<3.11"
 packages = [{ include = "src" }]
 dependencies = [
     "datasets>=3.0.0",
-    "deepmimov3>=0.2.9",
     "matplotlib>=3.9.4",
     "numpy>=1.26.4",
     "hydra-core>=1.3.2",
@@ -19,6 +18,7 @@ dependencies = [
     "tqdm>=4.67.3",
     "wandb[workspaces]>=0.25.1",
     "weave>=0.52.35",
+    "deepmimov3>=0.2.9",
 ]
 
 [dependency-groups]

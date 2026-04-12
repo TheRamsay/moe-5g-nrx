@@ -30,13 +30,14 @@ class DeepMIMOGenerationConfig:
     seed: int
     profile_name: str = "deepmimo"
     modulation: str = "qam16"
-    download_if_missing: bool = True
     active_users_only: bool = True
-    dataset_folder: str = "./Raytracing_scenarios"
+    dataset_folder: str = "./data/deepmimov3/"
     active_bs: tuple[int, ...] = (1,)
     user_rows: tuple[int, ...] | None = None
     user_subsampling: float = 1.0
     num_paths: int = 10
+    use_all_rows_if_unspecified: bool = True
+    allow_replacement_when_insufficient: bool = True
 
 
 def _flatten_channel_blocks(channels: Any) -> list[np.ndarray]:
@@ -271,6 +272,39 @@ def _extract_deepmimov3_channel_blocks(dataset: Any) -> list[np.ndarray]:
     return blocks
 
 
+def _infer_deepmimov3_all_user_rows(dataset_folder: str, scenario: str) -> tuple[int, ...] | None:
+    try:
+        import scipy.io
+    except ImportError:  # pragma: no cover - scipy comes with deepmimov3
+        return None
+
+    scenario_dir = Path(dataset_folder) / scenario
+    candidate_files = [
+        scenario_dir / "params.mat",
+        scenario_dir / f"{scenario}.params.mat",
+    ]
+    params_path = next((path for path in candidate_files if path.exists()), None)
+    if params_path is None:
+        return None
+
+    payload = scipy.io.loadmat(str(params_path))
+    user_grids_raw = payload.get("user_grids")
+    if user_grids_raw is None:
+        return None
+
+    user_grids = np.asarray(user_grids_raw, dtype=np.int64)
+    if user_grids.ndim == 1:
+        user_grids = user_grids.reshape(1, -1)
+    if user_grids.shape[1] < 2:
+        return None
+
+    min_row = max(int(user_grids[:, 0].min()) - 1, 0)
+    max_row = int(user_grids[:, 1].max()) - 1
+    if max_row < min_row:
+        return None
+    return tuple(range(min_row, max_row + 1))
+
+
 def _load_channels_from_deepmimo_v3(cfg: DeepMIMOGenerationConfig) -> list[np.ndarray]:
     import DeepMIMOv3 as dm3
 
@@ -287,6 +321,10 @@ def _load_channels_from_deepmimo_v3(cfg: DeepMIMOGenerationConfig) -> list[np.nd
     params["active_BS"] = np.asarray(cfg.active_bs, dtype=np.int64)
     if cfg.user_rows is not None:
         params["user_rows"] = np.asarray(cfg.user_rows, dtype=np.int64)
+    elif cfg.use_all_rows_if_unspecified:
+        all_rows = _infer_deepmimov3_all_user_rows(str(params["dataset_folder"]), str(params["scenario"]))
+        if all_rows is not None:
+            params["user_rows"] = np.asarray(all_rows, dtype=np.int64)
     params["user_subsampling"] = float(cfg.user_subsampling)
     params["enable_BS2BS"] = 0
     params["OFDM_channels"] = 1
@@ -323,7 +361,7 @@ def _load_channels_from_deepmimo_v4(cfg: DeepMIMOGenerationConfig) -> list[np.nd
     return blocks
 
 
-def _load_channels_from_deepmimo(cfg: DeepMIMOGenerationConfig) -> tuple[np.ndarray, np.ndarray]:
+def _load_channels_from_deepmimo(cfg: DeepMIMOGenerationConfig) -> tuple[np.ndarray, np.ndarray, int, bool]:
     try:
         blocks = _load_channels_from_deepmimo_v3(cfg)
     except ImportError:
@@ -339,14 +377,22 @@ def _load_channels_from_deepmimo(cfg: DeepMIMOGenerationConfig) -> tuple[np.ndar
 
     block_sizes = [block.shape[0] for block in blocks]
     total_samples = int(sum(block_sizes))
-    if total_samples < cfg.num_samples:
+    sampling_with_replacement = total_samples < cfg.num_samples
+    if sampling_with_replacement and not cfg.allow_replacement_when_insufficient:
         raise ValueError(
             f"DeepMIMO scenario provides {total_samples} samples, required {cfg.num_samples}. "
-            "Adjust generation.num_samples or scenario/trim configuration."
+            "Adjust generation.num_samples or scenario/trim configuration "
+            "(e.g. active_bs/user_rows), or enable replacement sampling."
         )
 
     select_rng = np.random.default_rng(cfg.seed)
-    selected = np.sort(select_rng.choice(total_samples, size=cfg.num_samples, replace=False))
+    selected = select_rng.choice(
+        total_samples,
+        size=cfg.num_samples,
+        replace=sampling_with_replacement,
+    )
+    if not sampling_with_replacement:
+        selected = np.sort(selected)
     selected_channels: list[np.ndarray] = []
 
     cumulative = np.cumsum(block_sizes)
@@ -367,7 +413,7 @@ def _load_channels_from_deepmimo(cfg: DeepMIMOGenerationConfig) -> tuple[np.ndar
     if subcarrier_indices is None:
         raise ValueError("Failed to resolve DeepMIMO subcarrier indices.")
 
-    return np.stack(selected_channels, axis=0), subcarrier_indices
+    return np.stack(selected_channels, axis=0), subcarrier_indices, total_samples, sampling_with_replacement
 
 
 def generate_deepmimo_arrow_dataset(
@@ -376,7 +422,9 @@ def generate_deepmimo_arrow_dataset(
 ) -> dict[str, Any]:
     """Generate a DeepMIMO OOD dataset and save it in Arrow format."""
 
-    channels, subcarrier_indices = _load_channels_from_deepmimo(cfg)
+    channels, subcarrier_indices, unique_channel_candidates, sampled_with_replacement = _load_channels_from_deepmimo(
+        cfg
+    )
     sample_rng = np.random.default_rng(cfg.seed + 1_000_000)
 
     def sample_generator():
@@ -422,6 +470,8 @@ def generate_deepmimo_arrow_dataset(
         "scenario": cfg.scenario,
         "format": "arrow_dir",
         "subcarrier_indices": subcarrier_indices.tolist(),
+        "unique_channel_candidates": unique_channel_candidates,
+        "sampled_with_replacement": sampled_with_replacement,
         "snr_db_min": cfg.snr_db_min,
         "snr_db_max": cfg.snr_db_max,
     }
