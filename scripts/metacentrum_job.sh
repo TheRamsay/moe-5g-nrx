@@ -163,6 +163,10 @@ cleanup() {
         rsync -a "$ARTIFACT_DIR/" "$JOB_RESULT_DIR/"
     fi
 
+    if [[ -d "$WORK_ROOT/checkpoints" ]]; then
+        rsync -a "$WORK_ROOT/checkpoints/" "$JOB_RESULT_DIR/checkpoints/"
+    fi
+
     if command -v clean_scratch >/dev/null 2>&1; then
         clean_scratch || true
     else
