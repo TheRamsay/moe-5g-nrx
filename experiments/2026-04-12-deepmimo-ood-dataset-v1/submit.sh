@@ -7,19 +7,18 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 MODE="${1:-print}"
 SCENARIO="${SCENARIO:-}"
-PROFILE_NAME="${PROFILE_NAME:-deepmimo}"
 OUTPUT_DIR="${OUTPUT_DIR:-data}"
 DATASET_FOLDER="${DATASET_FOLDER:-./data/deepmimov3/}"
 SPLIT="${SPLIT:-test}"
 NUM_SAMPLES="${NUM_SAMPLES:-32768}"
 RUNTIME_DEVICE="${RUNTIME_DEVICE:-cpu}"
-WALLTIME="${WALLTIME:-08:00:00}"
+WALLTIME="${WALLTIME:-00:40:00}"
 SELECT_RESOURCES="${SELECT_RESOURCES:-}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
 
 if [[ -z "$SCENARIO" ]]; then
   echo "ERROR: SCENARIO is required."
-  echo "Example: SCENARIO=asu_campus_3p5 bash submit.sh print"
+  echo "Example: SCENARIO=asu_campus1 bash submit.sh print"
   exit 1
 fi
 
@@ -33,7 +32,6 @@ RUN_ARGS=(
   "generation.log_to_wandb=true"
   "generation.deepmimo.scenario=$SCENARIO"
   "generation.deepmimo.dataset_folder=$DATASET_FOLDER"
-  "generation.deepmimo.profile_name=$PROFILE_NAME"
   "runtime.device=$RUNTIME_DEVICE"
 )
 

@@ -156,13 +156,13 @@ uv run python scripts/generate_deepmimo_dataset.py \
     generation.split=test \
     generation.num_samples=32768 \
     generation.deepmimo.scenario=asu_campus1 \
-    generation.deepmimo.profile_name=deepmimo
 ```
 
 This produces `data/test/asu_campus1` (directory), logs `dataset-test-deepmimo`,
 and can be consumed directly by `scripts/evaluate.py`.
 When generating deepmimo dataset scenario must be present in `data/deepmimov3/`.
 Currently the script supports only deepmimov3.
+Use submission script in `experiments/2026-04-12-deepmimo-ood-dataset-v1/submit.sh` to generate on cluster.
 
 ### Training Modes
 
@@ -283,7 +283,6 @@ uv run python scripts/generate_datasets.py generation.split=test generation.num_
 uv run python scripts/generate_deepmimo_dataset.py \
     generation.split=test generation.num_samples=32768 \
     generation.deepmimo.scenario=asu_campus1 \
-    generation.deepmimo.profile_name=deepmimo
 
 # Train and log the final checkpoint as a model artifact
 uv run python main.py experiment=exp01_baseline
