@@ -1,5 +1,10 @@
 """Benchmark different data loading strategies for mixed-profile training."""
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import time
 
 from src.data import build_cached_dataloader
