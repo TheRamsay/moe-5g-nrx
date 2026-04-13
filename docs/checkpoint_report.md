@@ -141,12 +141,11 @@ We also identify a key characterisation finding: **opposite failure modes** in h
 ![BLER vs FLOPs Pareto Frontier](figures/pareto_bler_flops.png)
 *Figure 5: BLER vs FLOPs Pareto frontier. Grey squares are dense baselines. Coloured circles are MoE runs. The line connects Pareto-optimal points. Asymmetric warm-start 12k (green) fills the gap between the collapsed Phase 2 (best BLER, max FLOPs) and Phase 1 (cheapest, worst BLER).*
 
-## 8. Next Steps
+## 8. Limitations & Next Steps
 
-1. **Extended training** (18k-20k steps) to see if BLER continues improving
-2. **SNR-binned routing analysis** — verify per-SNR expert selection within each profile
-3. **Out-of-distribution evaluation** on DeepMIMO ray-traced channels to test generalisation
-4. **Pareto frontier visualisation** with confidence intervals across seeds
+**Limitations.** The nano expert receives negligible traffic at realistic SNR — the effective routing is between small and large, with nano absorbing only hopeless low-SNR samples. A 2-expert ablation is needed to determine whether nano contributes at all. Results are from a single seed (s67) and the FLOPs penalty (alpha=1e-3) was inherited from Phase 1 without tuning for the asymmetric warm-start recipe.
+
+**Next steps.** Extended training to 20k steps (in progress). Alpha sweep to map the full Pareto curve and find operating points where all experts contribute at realistic SNR. Difficulty-guided routing — using per-sample SNR as a training-time supervision signal to encourage expert specialisation without requiring SNR at inference. Out-of-distribution evaluation on DeepMIMO ray-traced channels. Multi-seed runs for robustness.
 
 ## References
 
