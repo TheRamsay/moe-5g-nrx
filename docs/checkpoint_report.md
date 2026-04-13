@@ -111,6 +111,20 @@ Crucially, test-split evaluation reveals that the routing is **adaptive across c
 
 The router allocates significantly more traffic to the large expert on the harder TDLC channel (45.5% vs 30.2%), while using more of the lightweight nano expert on the easier UMA channel (30.5% vs 2.4%). This is the compute-adaptive behaviour the architecture was designed for.
 
+### 6.5 Per-SNR Routing Analysis
+
+Decomposing expert usage by SNR bin reveals that the router has learned a **difficulty-dependent routing policy** within each channel profile:
+
+![Expert Routing by SNR](figures/expert_usage_by_snr.png)
+*Figure 3: Expert usage per SNR bin on the test split. On TDLC, the router transitions from small-dominated routing at low SNR to large-dominated routing in the waterfall region (SNR > 9 dB). On UMA, nano dominates at low SNR with a gradual shift toward large at high SNR.*
+
+On TDLC, the transition is striking: at SNR=-8 dB the router sends 84% to small and 16% to nano (large is never used), while at SNR=18 dB it sends 93% to large. The crossover happens precisely in the waterfall region (SNR 5-9 dB) where expert quality differences matter most.
+
+Notably, the router does **not** follow a naive "hard→large, easy→nano" policy. Instead, it learned a cost-benefit strategy: at very low SNR where all experts fail (BLER=1.0), it saves compute by routing to small rather than wasting FLOPs on large. It reserves large exclusively for the waterfall region where large can actually reduce errors.
+
+![BLER by SNR: MoE vs Dense Baseline](figures/bler_by_snr_comparison.png)
+*Figure 4: BLER comparison across SNR bins. At high SNR (TDLC, 18 dB), asymmetric warm-start (0.267) approaches the dense large baseline (0.085) and substantially outperforms Phase 1 (0.391). Below the waterfall, all models saturate at BLER=1.0.*
+
 ## 7. Preliminary Results
 
 | Run | Routing | Avg BLER | Avg FLOPs | FLOPs % |
@@ -125,7 +139,7 @@ The asymmetric warm-start run represents a genuine Pareto point: it trades 3.1 p
 We also identify a key characterisation finding: **opposite failure modes** in heterogeneous MoE training. Joint-from-scratch (Phase 1) over-penalises the expensive expert, while full warm-start (Phase 2) cannot escape the dominant expert. Asymmetric warm-start resolves this by letting the large expert earn its traffic through training rather than receiving it by default.
 
 ![BLER vs FLOPs Pareto Frontier](figures/pareto_bler_flops.png)
-*Figure 3: BLER vs FLOPs Pareto frontier. Grey squares are dense baselines. Coloured circles are MoE runs. The line connects Pareto-optimal points. Asymmetric warm-start 12k (green) fills the gap between the collapsed Phase 2 (best BLER, max FLOPs) and Phase 1 (cheapest, worst BLER).*
+*Figure 5: BLER vs FLOPs Pareto frontier. Grey squares are dense baselines. Coloured circles are MoE runs. The line connects Pareto-optimal points. Asymmetric warm-start 12k (green) fills the gap between the collapsed Phase 2 (best BLER, max FLOPs) and Phase 1 (cheapest, worst BLER).*
 
 ## 8. Next Steps
 
