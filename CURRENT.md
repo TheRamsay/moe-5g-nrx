@@ -1,100 +1,82 @@
-# Current Work — 2026-04-11
+# Current Work — 2026-04-13
 
-## What We Learned Today
+## Pareto Results (Test Split)
 
-### HuggingFace dataset is solid — training bottleneck unblocked
-A friend uploaded the 5G NRX dataset to `Vack0/moe-5g-nrx` on HuggingFace with
-250k train + 20k val + 40k test samples per profile (uma, tdlc). Column schema
-already matches the project (`inputs`, `bit_labels`, `channel_target`, `snr_db`).
+| Run | Routing (large/nano/small) | TDLC BLER | UMA BLER | Avg BLER | FLOPs % | Config |
+|---|---|---|---|---|---|---|
+| Phase 2 v1 | 100/0/0 (collapsed) | 0.835 | 0.923 | **0.879** | 100% | exp17 |
+| **Asym warm 12k** | **33/29/38** | **0.881** | **0.944** | **0.913** | **55%** | exp23 + resume |
+| Phase 1 s56 | 39/36/24 | 0.906 | 0.945 | 0.926 | 48% | exp18 |
 
-**Replication run** (job 18856089): dense large, 10k steps, mixed uma/tdlc,
-trained on HF data instead of on-the-fly Sionna. Hit `best_score=0.1998`
-with val tdlc BER=0.1249 and val uma BER=0.2748 — indistinguishable from the
-Sionna baseline at the same step count. **The HF dataset produces the same
-results as Sionna.** See run `2qgunl39`.
+Asym warm 12k is the first run with genuinely heterogeneous routing and competitive BLER.
+Phase 2 v1 is the quality ceiling (but collapsed — no compute savings).
+Phase 1 s56 is the cheapest (but abandoned large — pure nano+small policy).
 
-This unblocks everything: we can retire `scripts/generate_datasets.py` and its
-malloc_trim workarounds. Phase 2 warm-start can start immediately.
+**Eval pending:** asym warm 12k test-split eval (job 18986864).
 
-### HF cache must be forced to persistent storage
-MetaCentrum pre-sets `HF_HUB_CACHE` and `HF_DATASETS_CACHE` to `$SCRATCHDIR` as
-part of the job environment. We learned this the hard way — first training run
-re-downloaded ~100GB of parquet to scratch despite setting `HF_HOME` correctly.
-Fix in `scripts/metacentrum_job.sh`: `unset` both vars before re-exporting with
-unconditional assignment (not `${VAR:-default}` defaulting).
+## What Happened This Sprint
 
-Dataset is now pre-cached at `/storage/brno2/home/ramsay/.cache/huggingface/`
-(124GB hub parquets + 126GB Arrow caches for both profiles). Future jobs find
-the cache and start training without re-downloading.
+### Phase 1 s56 (exp18) — joint from scratch, state_dim=56
+- Fixed the stem bottleneck from original Phase 1 (s32 → s56)
+- Result: router avoided large entirely (FLOPs penalty too aggressive), settled on nano+small
+- Test eval: BLER 0.926 avg, 48% FLOPs, heterogeneous but large abandoned
+- Checkpoint: `model-moe_phase1_s56_a1e3_b0p1_s67-2op33pak:best` (step 9000)
 
-### Code changes landed
-- `src/data/cached_dataset.py`: new `HuggingFaceNRXDataset` (lazy, memory-mapped
-  via Arrow). Also dropped the `metadata` key requirement from `CachedNRXDataset`
-  — channel_profile is inferred from filename/config name, modulation defaults
-  to `qam16`.
-- `main.py`: `_build_hf_train_loader` with `_AlternatingLoader` for mixed
-  training. `training.hf_dataset=Vack0/moe-5g-nrx` activates HF-backed training,
-  replacing the Sionna iterable pipeline.
-- `src/data/cached_dataset.py`: HF training is now batch-native via
-  `HuggingFaceNRXBatchIterableDataset`, avoiding per-sample Python object
-  creation and `torch.stack` collation in the hot training path.
-- `validation.hf_dataset` also supported but unused so far — existing `.pt`
-  val/test files still work.
-- `datasets>=3.0.0` added to dependencies.
-- `scripts/predownload_hf.sh`: PBS pre-download script (CPU-only, no GPU) for
-  warming the HF cache.
+### Phase 2 v1 (exp17) — warm-start + staged (2k frozen + 10k joint)
+- Router collapsed to 100% large from step 1, never recovered (beta=0.1 too weak)
+- Effectively a fine-tuned dense large: best BLER but zero compute savings
+- Test eval: BLER 0.879 avg, 100% FLOPs
+- Checkpoint: `model-moe_phase2_v1_a1e3_b0p1_s67-89no8f1k:best` (step 12000)
 
-### HF loader defaults are now relocked after the batched-loader rewrite
-The original `w2/p1` lock became stale once HF training moved to the new
-batch-native path. Interactive profiling on MetaCentrum shows the best current
-dense-HF settings are:
+### Anti-Collapse Sweep — 6 experiments, 3 mechanisms that break collapse
 
-- **Safe default:** `batch_size=128`, `hf_num_workers=4`, `hf_prefetch_factor=1`
-- **Preferred on ~12 CPU jobs:** `batch_size=128`, `hf_num_workers=6`, `hf_prefetch_factor=1`
-- `mixed_precision=null` stays unlocked by default — `bf16` reduced compute time
-  but did not beat fp32 end-to-end at the tested batch sizes because the loader
-  became the bottleneck again.
+| Experiment | Mechanism | Entropy | Routing | BLER | Verdict |
+|---|---|---|---|---|---|
+| β=0.5, β=1.0 | MSE load balance | ~0 | 100% large | good | **collapsed** |
+| β=2.0 | MSE load balance (strong) | 1.097 | 33/33/33 uniform | terrible | breaks collapse but forced-uniform, experts can't specialize |
+| capacity (cf=1.5, w=0.5) | Soft capacity constraint | ~0 | 100% large | good | diverse during frozen phase, **collapsed after unfreeze** |
+| switch_aux (w=0.01) | Switch Transformer aux loss | ~0 | 100% large | — | **total failure**, weight too weak |
+| **asym_warm** | Large starts random | **0.811** | **33/29/38** | **0.913** | **positive result** — large woke up after 6k steps |
 
-**Key dense-HF runs on the new batched loader:**
+### Asym Warm 12k — The Breakthrough
+- Asymmetric warm-start: stem + nano + small warm-started, large starts random
+- At 6k steps: large was 0% (hadn't trained up yet), router used nano+small only
+- **Extended to 12k via resume**: large caught up and router discovered it (33% usage)
+- All three experts active with meaningful shares
+- Val TDLC BLER@SNR=17: 0.411 (vs Phase 1's 0.588, Phase 2's 0.215)
+- Checkpoint: `model-moe_phase2_asym_nlwarm_s67_12k-3witw8yw:best` (step 12000)
 
-| Setting | Run | Outcome |
-|---|---|---|
-| `w4/p1`, `bs128` | `lrf92vz2` | Stable and strong on smaller CPU budgets |
-| `w6/p1`, `bs128` | `5gvzene7` | Best current result on ~12 CPU jobs; 100 steps in ~42s |
-| `bf16`, `w4/p1`, `bs128` | `9abksolf` | Faster `step_t`, but not a clear end-to-end win |
-
-Interpretation:
-- Batched HF loading was the major performance fix.
-- For long mixed runs, `prefetch=1` is consistently more stable than `prefetch=2`.
-- Higher worker counts help only when host CPUs are actually available.
-- A separate tuned preset now exists in `conf/experiment/exp16_dense_large_hf_tuned.yaml`.
-
----
+### Infrastructure Improvements
+- **Checkpoint sync fix**: `metacentrum_job.sh` now syncs `$WORK_ROOT/checkpoints/`
+  during cleanup — walltime kills no longer lose checkpoints
+- **Resume support**: `training.resume_from` accepts local path or W&B artifact ref.
+  Restores model weights + optimizer state + global_step. Used successfully for the
+  6k→12k extension runs.
+- **Latest checkpoints upload to W&B**: `log_artifact=True` for latest checkpoints,
+  not just best. Survives walltime kills even without local sync.
+- **Resource tuning**: 24GB RAM is sufficient (was 48GB). Faster queue times.
 
 ## Currently Running Jobs
 
-None.
-
----
+| Job ID | Description | Status |
+|---|---|---|
+| 18986864 | Asym warm 12k test-split eval | running |
 
 ## Immediate Next Steps
 
-1. **Phase 2 warm-start** — all three dense checkpoints are finalized; router
-   training can start as soon as HF training path is proven stable.
-   - Stage 1: freeze experts, train router ~2-3k steps
-   - Stage 2: unfreeze, joint fine-tune ~10k steps (alpha=1e-3, beta=0.1)
-2. **Promote the tuned dense-HF preset into real batch runs** and use it as the
-   local dense comparison point for future MoE work.
-3. **Retire `generate_datasets.py`** — no longer needed for training data.
-
----
+1. **Get asym warm 12k test eval** — confirm the val numbers hold on test split
+2. **Update experiment READMEs** with final results
+3. **Generate Pareto plot** (BLER vs FLOPs) with all runs
+4. **SNR-binned expert usage analysis** — check if routing is adaptive (hard→large)
+   or just uniform. The eval tables have `eval/expert_usage_snr_binned`.
+5. **Consider extending asym warm further** (18k–20k) to see if BLER keeps improving
+6. **DeepMIMO OOD evaluation** — teammate added the dataset generator, test generalization
 
 ## Open Questions
 
-- Is per-sample Arrow→torch conversion the actual GPU bottleneck, or is it
-  something else? Profile the data pipeline before assuming.
-- Should val/test also move to HF dataset, or keep the existing `.pt` files?
-  (No urgency — they work.)
-- For final comparisons, should the canonical dense baseline be refreshed under
-  the same HF train regime as Phase 2 MoE, to remove the train-source confound?
-- Phase 2: does warm-start actually improve over joint-from-scratch (Phase 1)?
+- Is the asym warm routing actually adaptive (SNR-dependent) or just near-uniform?
+- Would extending to 20k steps close the BLER gap to Phase 2 v1?
+- Can direction B (uniform-prior KL during frozen phase) produce better results
+  than asym warm? (Not yet tested)
+- Should we try asym warm with different alpha/beta?
+- DeepMIMO OOD: how much does BLER degrade on real ray-traced channels?
