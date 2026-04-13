@@ -66,7 +66,7 @@ def pareto_plot():
         ("Phase 1 (joint)", (917 + 628) / 2, (0.906 + 0.945) / 2, C_SMALL, "^"),
         ("Phase 2 (collapsed)", 1604, (0.835 + 0.923) / 2, C_RED, "v"),
         ("Asym warm 6k", (601 + 639) / 2, (0.945 + 0.971) / 2, C_ROSE, "o"),
-        ("Asym warm 12k", 880, (0.881 + 0.944) / 2, C_LARGE, "D"),
+        ("Asym warm 12k", (1100 + 856) / 2, (0.881 + 0.939) / 2, C_LARGE, "D"),
         (r"$\beta$=2.0", (860 + 864) / 2, (0.962 + 0.975) / 2, C_PURPLE, "X"),
     ]
     for name, flops, bler, color, marker in moe:
@@ -87,7 +87,9 @@ def pareto_plot():
         )
 
     # Pareto frontier
-    pareto = sorted([(1604, (0.835 + 0.923) / 2), (880, (0.881 + 0.944) / 2), ((917 + 628) / 2, (0.906 + 0.945) / 2)])
+    pareto = sorted(
+        [(1604, (0.835 + 0.923) / 2), ((1100 + 856) / 2, (0.881 + 0.939) / 2), ((917 + 628) / 2, (0.906 + 0.945) / 2)]
+    )
     ax.plot(*zip(*pareto), "-", color=C_LARGE, alpha=0.25, linewidth=2, zorder=3)
 
     ax.set_xlabel("Average Realized FLOPs (M)")

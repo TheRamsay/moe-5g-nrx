@@ -100,7 +100,16 @@ The breakthrough came from attacking the root cause: **remove the warm-start adv
 At 6k steps, the router used only nano+small (large was still untrained). We extended the run to 12k steps using checkpoint resume, and **large "woke up"** — the router discovered it once it became competitive (~step 8000-10000).
 
 ![Expert Usage Over Training — Asymmetric Warm-Start](figures/expert_usage_asym_warm.png)
-*Figure 2: Expert usage during asymmetric warm-start training. Large (random init) initially dominates briefly, crashes to ~0% by step 2000, then re-emerges at step ~6550 as it trains up to competence. Final routing: 33% large, 29% nano, 38% small.*
+*Figure 2: Expert usage during asymmetric warm-start training. Large (random init) crashes to ~0% by step 2000, then re-emerges at step ~6550 as it trains up to competence.*
+
+Crucially, test-split evaluation reveals that the routing is **adaptive across channel profiles**:
+
+| Profile | large | nano | small | Realized FLOPs |
+|---|---|---|---|---|
+| **TDLC** (harder) | **45.5%** | 2.4% | 52.1% | 1100M |
+| **UMA** (easier) | 30.2% | 30.5% | 39.3% | 856M |
+
+The router allocates significantly more traffic to the large expert on the harder TDLC channel (45.5% vs 30.2%), while using more of the lightweight nano expert on the easier UMA channel (30.5% vs 2.4%). This is the compute-adaptive behaviour the architecture was designed for.
 
 ## 7. Preliminary Results
 
@@ -108,23 +117,22 @@ At 6k steps, the router used only nano+small (large was still untrained). We ext
 |---|---|---|---|---|
 | Dense large (baseline) | — | ~0.879 | 1604M | 100% |
 | Phase 2 v1 (collapsed) | 100% large | **0.879** | 1604M | 100% |
-| **Asym warm 12k** | **33/29/38** | **0.913** | **~880M** | **~55%** |
+| **Asym warm 12k** | **adaptive** | **0.910** | **978M** | **61%** |
 | Phase 1 s56 | 39/36/24 | 0.926 | 772M | 48% |
 
-The asymmetric warm-start run represents a genuine Pareto point: it trades 3.4 pp BLER compared to the dense large baseline for a **45% reduction in average FLOPs**, with all three experts actively contributing.
+The asymmetric warm-start run represents a genuine Pareto point: it trades 3.1 pp BLER compared to the dense large baseline for a **39% reduction in average FLOPs**, with the router adapting compute allocation to channel difficulty.
 
 We also identify a key characterisation finding: **opposite failure modes** in heterogeneous MoE training. Joint-from-scratch (Phase 1) over-penalises the expensive expert, while full warm-start (Phase 2) cannot escape the dominant expert. Asymmetric warm-start resolves this by letting the large expert earn its traffic through training rather than receiving it by default.
 
 ![BLER vs FLOPs Pareto Frontier](figures/pareto_bler_flops.png)
-*Figure 3: BLER vs FLOPs Pareto frontier. Grey squares are dense baselines. Coloured circles are MoE runs. The dashed line connects Pareto-optimal points. Asymmetric warm-start 12k (green) fills the gap between the collapsed Phase 2 (best BLER, max FLOPs) and Phase 1 (cheapest, worst BLER).*
+*Figure 3: BLER vs FLOPs Pareto frontier. Grey squares are dense baselines. Coloured circles are MoE runs. The line connects Pareto-optimal points. Asymmetric warm-start 12k (green) fills the gap between the collapsed Phase 2 (best BLER, max FLOPs) and Phase 1 (cheapest, worst BLER).*
 
 ## 8. Next Steps
 
-1. **Test-split evaluation** of asymmetric warm-start 12k to confirm validation numbers
-2. **SNR-binned routing analysis** — verify whether routing is adaptive (difficulty-dependent) or near-uniform
-3. **Extended training** (18k-20k steps) to see if BLER continues improving
-4. **Out-of-distribution evaluation** on DeepMIMO ray-traced channels to test generalisation
-5. **Pareto frontier visualisation** with confidence intervals across seeds
+1. **Extended training** (18k-20k steps) to see if BLER continues improving
+2. **SNR-binned routing analysis** — verify per-SNR expert selection within each profile
+3. **Out-of-distribution evaluation** on DeepMIMO ray-traced channels to test generalisation
+4. **Pareto frontier visualisation** with confidence intervals across seeds
 
 ## References
 
