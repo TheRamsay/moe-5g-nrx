@@ -17,3 +17,9 @@ checkpoints/
 *.hdf5
 *.tfrecord
 results/
+
+# Local-only AI-generated and reference docs (kept untracked)
+/AGENTS.md
+/CURRENT.md
+/docs/MoE-roadmap.md
+/docs/Research-positioning.md
