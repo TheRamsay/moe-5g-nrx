@@ -5,14 +5,15 @@
 | Run | Routing (large/nano/small) | TDLC BLER | UMA BLER | Avg BLER | FLOPs % | Config |
 |---|---|---|---|---|---|---|
 | Phase 2 v1 | 100/0/0 (collapsed) | 0.835 | 0.923 | **0.879** | 100% | exp17 |
-| **Asym warm 12k** | **33/29/38** | **0.881** | **0.944** | **0.913** | **55%** | exp23 + resume |
+| **Asym warm 12k** | **46/2/52 (tdlc) 30/31/39 (uma)** | **0.881** | **0.939** | **0.910** | **61%** | exp23 + resume |
 | Phase 1 s56 | 39/36/24 | 0.906 | 0.945 | 0.926 | 48% | exp18 |
 
-Asym warm 12k is the first run with genuinely heterogeneous routing and competitive BLER.
-Phase 2 v1 is the quality ceiling (but collapsed — no compute savings).
-Phase 1 s56 is the cheapest (but abandoned large — pure nano+small policy).
+Asym warm 12k has genuinely **adaptive** routing: TDLC (harder) gets 46% large, UMA (easier)
+gets 31% nano. Per-SNR analysis shows the router sends large to the waterfall region where
+expert quality matters, and nano/small to low SNR where all experts fail equally.
 
-**Eval pending:** asym warm 12k test-split eval (job 18986864).
+**Key finding:** routing is SNR-adaptive. At TDLC SNR=18, 93% goes to large. At SNR=-8,
+84% goes to small (rational — large can't help at hopeless SNR).
 
 ## What Happened This Sprint
 
@@ -60,23 +61,50 @@ Phase 1 s56 is the cheapest (but abandoned large — pure nano+small policy).
 
 | Job ID | Description | Status |
 |---|---|---|
-| 18986864 | Asym warm 12k test-split eval | running |
+| 18987381 | Asym warm 20k (resume from 12k) | running, step ~16.5k, ~3.5h left |
+
+## Completed Since Last Update
+
+- Asym warm 12k test eval: TDLC 0.881, UMA 0.939, avg 0.910, FLOPs 61%
+- Per-SNR routing analysis: router is SNR-adaptive (large dominates waterfall, nano/small at low SNR)
+- Checkpoint report drafted with 5 figures, submitted
+- Resume support added and tested (12k→20k resume working)
+- Checkpoint sync fix (walltime kills no longer lose checkpoints)
+- Latest checkpoints now upload to W&B
+
+## Asym Warm 20k Progress (in-flight)
+
+Val BLER is improving as training continues:
+
+| Step | Val TDLC BLER | Val TDLC @SNR=17 | Routing (large/nano/small) |
+|---|---|---|---|
+| 12000 | 0.881 | 0.411 | 33/29/38 |
+| 15000 | 0.858 | 0.304 | 39/21/40 |
+| 15500 | — | — | best checkpoint so far |
+| 16000 | 0.851 | 0.273 | 39/22/39 |
+| 16500 | 0.854 | 0.291 | 39/22/39 |
+
+Routing has stabilised at ~39% large / 22% nano / 39% small. FLOPs ratio ~0.60.
+BLER still trending down but oscillating. Best checkpoint at step 15500.
 
 ## Immediate Next Steps
 
-1. **Get asym warm 12k test eval** — confirm the val numbers hold on test split
-2. **Update experiment READMEs** with final results
-3. **Generate Pareto plot** (BLER vs FLOPs) with all runs
-4. **SNR-binned expert usage analysis** — check if routing is adaptive (hard→large)
-   or just uniform. The eval tables have `eval/expert_usage_snr_binned`.
-5. **Consider extending asym warm further** (18k–20k) to see if BLER keeps improving
-6. **DeepMIMO OOD evaluation** — teammate added the dataset generator, test generalization
+1. **Wait for 20k run** to finish, run test eval
+2. **Alpha sweep** on asym warm: {5e-4, 2e-3} to map Pareto curve
+3. **Multi-seed** (s32, s42) on best config for robustness
+4. **DeepMIMO OOD evaluation** — pipeline ready
+5. **Difficulty-guided routing** — use per-sample SNR in loss to improve specialisation
+
+## Key Findings
+
+- Nano is underutilised at realistic SNR (mostly absorbs hopeless low-SNR traffic)
+- Effective routing is small vs large; nano is a "loss sink" at realistic operating points
+- Per-SNR routing is rational: router spends FLOPs where they change BLER outcomes
+- Training speed bottleneck is data loading (~3.5s/step, GPU idle 99% of the time)
 
 ## Open Questions
 
-- Is the asym warm routing actually adaptive (SNR-dependent) or just near-uniform?
-- Would extending to 20k steps close the BLER gap to Phase 2 v1?
-- Can direction B (uniform-prior KL during frozen phase) produce better results
-  than asym warm? (Not yet tested)
-- Should we try asym warm with different alpha/beta?
-- DeepMIMO OOD: how much does BLER degrade on real ray-traced channels?
+- Will 20k steps close the BLER gap further, or has the model plateaued?
+- Can alpha tuning find a better BLER/FLOPs operating point?
+- Would difficulty-guided routing improve nano utilisation at realistic SNR?
+- Data loader optimisation: chunked alternation or single interleaved dataset?

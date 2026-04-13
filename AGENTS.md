@@ -9,9 +9,11 @@ This is a **domain-aware** project, not just "more layers": routing should use c
 ## Current Project State (2026-04-13)
 
 - **Best result:** Asymmetric warm-start 12k (exp23 + resume) — all 3 experts active
-  (33% large, 29% nano, 38% small), val BLER 0.913 avg at 55% FLOPs. First genuinely
-  heterogeneous routing with competitive quality.
-- **Pareto frontier:** Phase 2 v1 (BLER 0.879 / 100% FLOPs) → Asym warm 12k (0.913 / 55%) → Phase 1 s56 (0.926 / 48%)
+  with **SNR-adaptive routing**: TDLC gets 46% large (harder), UMA gets 31% nano (easier).
+  Test BLER 0.910 avg at 61% FLOPs. Routing confirmed adaptive per SNR bin.
+- **20k run in progress:** val TDLC BLER improving (0.881→0.851 at step 16k), routing
+  stable at ~39% large / 22% nano / 39% small.
+- **Pareto frontier:** Phase 2 v1 (BLER 0.879 / 100% FLOPs) → Asym warm 12k (0.910 / 61%) → Phase 1 s56 (0.926 / 48%)
 - **Data pipeline:** training loads from `Vack0/moe-5g-nrx` on HuggingFace
   (250k samples per profile, cached in persistent storage on the cluster).
   Validation/test use cached `.pt` datasets at `/auto/brno2/home/ramsay/moe-5g-datasets/dense-v1/`.
@@ -86,14 +88,22 @@ All artifacts are under `knn_moe-5g-nrx/moe-5g-nrx/`.
 - Single joint phase (no freezing), alpha=1e-3, beta=0.1
 - 6k steps: large=0% (hadn't trained up), router used nano+small only
 - **Extended to 12k via resume:** large caught up, router discovered it
-- Final routing: 33% large, 29% nano, 38% small (all three active)
-- Val: TDLC BLER=0.881, UMA BLER=0.944, avg=0.913, FLOPs=55%
-- Val TDLC BLER@SNR=17: 0.411
-- Checkpoint: `model-moe_phase2_asym_nlwarm_s67_12k-3witw8yw:best`
+- Final routing (12k): 33% large, 29% nano, 38% small (all three active)
+- **Test eval (12k):** TDLC BLER=0.881, UMA BLER=0.939, avg=0.910, FLOPs=61%
+- **Routing is SNR-adaptive:** TDLC routes 46% to large (harder channel), UMA routes
+  31% nano (easier). Per-SNR: 93% large at TDLC SNR=18, 84% small at SNR=-8.
+- Checkpoint (12k): `model-moe_phase2_asym_nlwarm_s67_12k-3witw8yw:best`
+- **20k extension in progress:** val TDLC BLER improving (0.881→0.851 at step 16k),
+  TDLC @SNR=17 down to 0.273. Routing stable at ~39/22/39.
+- Checkpoint (20k): `model-moe_phase2_asym_nlwarm_s67_20k-...:best` (pending)
 
 **Key insight:** asymmetric warm-start works because it removes the dominant-expert
 trap. Large must earn its traffic by training up, rather than receiving it by default.
 The router discovers large once it becomes competitive (~step 8000-10000).
+
+**Limitation:** nano is underutilised at realistic SNR. The effective routing at
+SNR >10 dB is mostly small vs large. Nano absorbs hopeless low-SNR traffic to save
+FLOPs but doesn't contribute to actual decoding quality in the operating range.
 
 ### Opposite Failure Modes (Key Characterization Finding)
 
