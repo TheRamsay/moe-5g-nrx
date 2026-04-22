@@ -47,6 +47,9 @@ class Trainer:
 
         self.model = self.model.to(self.device)
         self.num_parameters = sum(parameter.numel() for parameter in self.model.parameters())
+        if cfg.training.get("torch_compile", False) and self.device.type == "cuda":
+            self.model = torch.compile(self.model, mode="reduce-overhead")
+            print("[INFO] torch.compile enabled (mode=reduce-overhead) — first step will be slow (~30-60s)")
         self._amp_dtype = self._resolve_amp_dtype(cfg.training.get("mixed_precision"))
         if (
             self.device.type == "cuda"

@@ -29,7 +29,8 @@ training:
     hf_prefetch_factor: 2   # 2 batches queued per worker
     hf_max_samples: null    # cap training samples per profile; null = use full dataset
     hf_train_data_dir: null # local Arrow dir for training; if set, overrides hf_dataset reads (expects {dir}/{profile}/)
-    mixed_precision: null   # optional fp16/bf16 AMP; not locked by default because it did not beat fp32 end-to-end
+    mixed_precision: null   # bf16 recommended on L40S/A100; fp16 needs GradScaler; null = fp32
+    torch_compile: false    # torch.compile(model, mode=reduce-overhead); adds ~30-60s warmup, then faster
     batch_size: 512
     learning_rate: 0.001
     weight_decay: 0.0001
