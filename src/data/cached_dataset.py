@@ -261,7 +261,9 @@ class HuggingFaceNRXBatchIterableDataset(IterableDataset[CachedNRXBatch]):
             if self.local_data_dir is not None:
                 from datasets import load_from_disk
 
-                ds = load_from_disk(str(self.local_data_dir / self.config))
+                # keep_in_memory=True: loads shard into RAM so shuffle+iter are
+                # fast in-memory ops instead of random SSD seeks
+                ds = load_from_disk(str(self.local_data_dir / self.config), keep_in_memory=True)
             else:
                 from datasets import load_dataset
 
@@ -294,7 +296,7 @@ class HuggingFaceNRXBatchIterableDataset(IterableDataset[CachedNRXBatch]):
         dataset = self._get_or_create_dataset()
         iteration_seed = self._iteration_seed()
         if self.shuffle:
-            dataset = dataset.shuffle(seed=iteration_seed, buffer_size=2000)
+            dataset = dataset.shuffle(seed=iteration_seed)
         if num_workers > 1:
             dataset = dataset.shard(num_shards=num_workers, index=worker_id, contiguous=True)
         self._iteration_index += 1
