@@ -49,8 +49,11 @@ split_cli_args() {
 # =============================================================================
 
 REPO_ROOT="${REPO_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}"
-SUBMIT_HOME="${PBS_O_HOME:-$HOME}"
+SUBMIT_HOME="${PBS_O_HOME:-}"
 if [[ -z "$SUBMIT_HOME" || ! -d "$SUBMIT_HOME" || "$SUBMIT_HOME" == /scratch* || "$SUBMIT_HOME" == /var/spool/* ]]; then
+    SUBMIT_HOME="$(getent passwd "${USER:-$(id -un)}" | cut -d: -f6 2>/dev/null || true)"
+fi
+if [[ -z "$SUBMIT_HOME" || ! -d "$SUBMIT_HOME" || "$SUBMIT_HOME" == /scratch* ]]; then
     SUBMIT_HOME="$(dirname -- "$REPO_ROOT")"
 fi
 export HOME="$SUBMIT_HOME"
