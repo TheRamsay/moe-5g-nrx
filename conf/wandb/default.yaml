@@ -3,6 +3,7 @@ logging:
   # Wandb-specific settings
   project: moe-5g-nrx
   entity: knn_moe-5g-nrx
+  job_type: train
   tags: []
   notes: null
   
