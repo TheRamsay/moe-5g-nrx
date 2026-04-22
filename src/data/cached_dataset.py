@@ -294,7 +294,7 @@ class HuggingFaceNRXBatchIterableDataset(IterableDataset[CachedNRXBatch]):
         dataset = self._get_or_create_dataset()
         iteration_seed = self._iteration_seed()
         if self.shuffle:
-            dataset = dataset.shuffle(seed=iteration_seed)
+            dataset = dataset.shuffle(seed=iteration_seed, buffer_size=2000)
         if num_workers > 1:
             dataset = dataset.shard(num_shards=num_workers, index=worker_id, contiguous=True)
         self._iteration_index += 1
