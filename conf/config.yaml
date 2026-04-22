@@ -25,12 +25,12 @@ data:
 
 training:
     hf_dataset: null        # e.g. "Vack0/moe-5g-nrx" — use HuggingFace dataset instead of on-the-fly Sionna
-    hf_num_workers: 4       # safe default for mixed HF runs on ~8 CPU jobs; use 6 on ~12 CPU jobs
-    hf_prefetch_factor: 1   # prefetch=1 stayed more stable than prefetch=2 on long mixed runs
+    hf_num_workers: 2       # per profile; 2×2=4 total for mixed — fits in 24GB RAM with CoW pre-load
+    hf_prefetch_factor: 2   # 2 batches queued per worker
     hf_max_samples: null    # cap training samples per profile; null = use full dataset
     hf_train_data_dir: null # local Arrow dir for training; if set, overrides hf_dataset reads (expects {dir}/{profile}/)
     mixed_precision: null   # optional fp16/bf16 AMP; not locked by default because it did not beat fp32 end-to-end
-    batch_size: 32
+    batch_size: 512
     learning_rate: 0.001
     weight_decay: 0.0001
     scheduler:
