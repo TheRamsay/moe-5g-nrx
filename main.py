@@ -71,6 +71,7 @@ def _build_hf_train_loader(cfg: DictConfig, hf_repo: str):
 
     loaders = {}
     for profile in profiles:
+        max_samples = cfg.training.get("hf_max_samples")
         ds = HuggingFaceNRXBatchIterableDataset(
             hf_repo,
             profile,
@@ -79,6 +80,7 @@ def _build_hf_train_loader(cfg: DictConfig, hf_repo: str):
             drop_last=True,
             shuffle=True,
             base_seed=int(cfg.runtime.seed),
+            max_samples=int(max_samples) if max_samples is not None else None,
         )
         print(
             f"[INFO] HF training dataset: {hf_repo}/{profile}/train ({ds.num_samples} samples, {len(ds)} batches/epoch)"
