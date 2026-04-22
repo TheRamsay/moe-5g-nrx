@@ -63,7 +63,7 @@ Shared stem (285M FLOPs, always paid) + channel-aware router + 3 heterogeneous e
 
 ## Cluster
 
-- **Resources:** `ncpus=12:ngpus=1:mem=24gb:scratch_ssd=40gb` — no `gpu_mem`
+- **Resources:** `ncpus=8:ngpus=1:mem=32gb:scratch_ssd=40gb` — no `gpu_mem`
 - **Walltime:** with optimized pipeline (~3k samples/s), 6k steps ≈ 1h, 20k steps ≈ 3-4h. Add buffer for startup + validation.
 - **Default training config:** `batch_size=512`, `hf_num_workers=2` (per profile), `hf_prefetch_factor=2`
 - Checkpoints sync from `$WORK_ROOT/checkpoints/` on cleanup; latest also uploads to W&B.
