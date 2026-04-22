@@ -64,7 +64,7 @@ fi
 
 export UV_CACHE_DIR="${UV_CACHE_DIR:-${HOME}/.cache/uv}"
 export UV_PYTHON_INSTALL_DIR="${UV_PYTHON_INSTALL_DIR:-${HOME}/.local/share/uv/python}"
-export UV_LINK_MODE=copy
+export UV_LINK_MODE=symlink
 
 # Keep CPU threadpools from oversubscribing dataloader-heavy jobs.
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"

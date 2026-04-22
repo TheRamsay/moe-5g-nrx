@@ -34,7 +34,7 @@ UV_BIN="${UV_BIN:-$SUBMIT_HOME/.local/bin/uv}"
 export PATH="$(dirname -- "$UV_BIN"):$PATH"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-$SUBMIT_HOME/.cache/uv}"
 export UV_PYTHON_INSTALL_DIR="${UV_PYTHON_INSTALL_DIR:-$SUBMIT_HOME/.local/share/uv/python}"
-export UV_LINK_MODE=copy
+export UV_LINK_MODE=symlink
 
 export TMPDIR="$SCRATCHDIR/tmp"
 export XDG_CACHE_HOME="$SCRATCHDIR/.cache"

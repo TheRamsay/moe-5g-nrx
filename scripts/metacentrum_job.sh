@@ -128,7 +128,7 @@ init_modules
 export PATH="$(dirname -- "$UV_BIN"):$PATH"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-$SUBMIT_HOME/.cache/uv}"
 export UV_PYTHON_INSTALL_DIR="${UV_PYTHON_INSTALL_DIR:-$SUBMIT_HOME/.local/share/uv/python}"
-export UV_LINK_MODE=copy
+export UV_LINK_MODE=symlink
 
 WORK_ROOT="$SCRATCHDIR/work"
 ARTIFACT_DIR="$SCRATCHDIR/artifacts"
