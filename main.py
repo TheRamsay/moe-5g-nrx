@@ -7,14 +7,9 @@ from pathlib import Path
 import hydra
 import numpy as np
 import torch
-from omegaconf import DictConfig, open_dict
-from torch.utils.data import DataLoader
+from omegaconf import DictConfig
 
-from src.data import (
-    HuggingFaceNRXBatchIterableDataset,
-    build_dataloader,
-    collate_single_cached_batch,
-)
+from src.data import build_train_loader
 from src.training import Trainer
 
 os.environ["TF_USE_LEGACY_KERAS"] = "1"
@@ -28,109 +23,13 @@ def _set_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
-class _AlternatingLoader:
-    """Alternates batches between per-profile DataLoaders (matches MixedNRXIterableDataset)."""
-
-    def __init__(self, loaders: dict[str, DataLoader]):
-        self.loaders = loaders
-        self.profiles = list(loaders.keys())
-
-    def __iter__(self):
-        iters = {p: iter(dl) for p, dl in self.loaders.items()}
-        idx = 0
-        while True:
-            profile = self.profiles[idx % len(self.profiles)]
-            try:
-                yield next(iters[profile])
-            except StopIteration:
-                iters[profile] = iter(self.loaders[profile])
-                yield next(iters[profile])
-            idx += 1
-
-
-def _build_hf_train_loader(cfg: DictConfig, hf_repo: str):
-    """Build a training loader backed by a HuggingFace dataset."""
-    channel_profile = str(cfg.dataset.channel_profile).lower()
-    batch_size = int(cfg.training.batch_size)
-
-    if channel_profile == "mixed":
-        profiles = list(cfg.dataset.mixed.get("profiles", ["uma", "tdlc"]))
-    else:
-        profiles = [channel_profile]
-
-    num_workers = int(cfg.training.get("hf_num_workers", 2))
-    prefetch_factor = int(cfg.training.get("hf_prefetch_factor", 1))
-    total_workers = num_workers * len(profiles)
-
-    print(
-        "[INFO] HF train loader config: "
-        f"repo={hf_repo} profiles={profiles} batch_size={batch_size} "
-        f"per_profile_workers={num_workers} total_workers={total_workers} "
-        f"prefetch_factor={prefetch_factor}"
-    )
-
-    loaders = {}
-    for profile in profiles:
-        max_samples = cfg.training.get("hf_max_samples")
-        ds = HuggingFaceNRXBatchIterableDataset(
-            hf_repo,
-            profile,
-            "train",
-            batch_size=batch_size,
-            drop_last=True,
-            shuffle=True,
-            base_seed=int(cfg.runtime.seed),
-            max_samples=int(max_samples) if max_samples is not None else None,
-        )
-        print(
-            f"[INFO] HF training dataset: {hf_repo}/{profile}/train ({ds.num_samples} samples, {len(ds)} batches/epoch)"
-        )
-        loaders[profile] = DataLoader(
-            ds,
-            batch_size=None,
-            num_workers=num_workers,
-            pin_memory=True,
-            collate_fn=collate_single_cached_batch,
-            persistent_workers=num_workers > 0,
-            prefetch_factor=prefetch_factor if num_workers > 0 else None,
-        )
-
-    if len(loaders) == 1:
-        return next(iter(loaders.values()))
-    return _AlternatingLoader(loaders)
-
-
-def _build_train_loader(cfg: DictConfig):
-    # Keep model/data geometry synchronized with generator dataset config.
-    with open_dict(cfg):
-        cfg.data.num_subcarriers = int(cfg.dataset.num_subcarriers)
-        cfg.data.num_ofdm_symbols = int(cfg.dataset.num_ofdm_symbols)
-
-    hf_dataset = cfg.training.get("hf_dataset")
-    if hf_dataset:
-        return _build_hf_train_loader(cfg, str(hf_dataset))
-
-    return build_dataloader(cfg)
-
-
-class _TrainingBatchAdapter:
-    """Convert NRXBatch/CachedNRXBatch into trainer tuple contract."""
-
-    def __init__(self, dataloader):
-        self._dataloader = dataloader
-
-    def __iter__(self):
-        for batch in self._dataloader:
-            yield batch.inputs, batch.bit_labels.flatten(start_dim=1), batch.channel_target, batch.channel_profile
-
-
 @hydra.main(config_path="conf", config_name="config", version_base=None)
 def main(cfg: DictConfig) -> None:
     """Run the dense baseline training pipeline."""
     _set_seed(int(cfg.runtime.seed))
     print(f"Config: {cfg.model.name} ({cfg.model.family})")
 
-    train_loader = _TrainingBatchAdapter(_build_train_loader(cfg))
+    train_loader = build_train_loader(cfg)
     trainer = Trainer(cfg, job_id=os.environ.get("PBS_JOBID"))
 
     try:

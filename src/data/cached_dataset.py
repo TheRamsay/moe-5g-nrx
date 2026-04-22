@@ -241,6 +241,7 @@ class HuggingFaceNRXBatchIterableDataset(IterableDataset[CachedNRXBatch]):
         drop_last: bool = True,
         shuffle: bool = True,
         base_seed: int | None = None,
+        local_data_dir: str | Path | None = None,
     ) -> None:
         super().__init__()
         self.repo_id = repo_id
@@ -251,14 +252,20 @@ class HuggingFaceNRXBatchIterableDataset(IterableDataset[CachedNRXBatch]):
         self.drop_last = drop_last
         self.shuffle = shuffle
         self.base_seed = base_seed
+        self.local_data_dir = Path(local_data_dir) if local_data_dir is not None else None
         self._dataset = None
         self._iteration_index = 0
 
     def _get_or_create_dataset(self):
         if self._dataset is None:
-            from datasets import load_dataset
+            if self.local_data_dir is not None:
+                from datasets import load_from_disk
 
-            ds = load_dataset(self.repo_id, self.config, split=self.split)
+                ds = load_from_disk(str(self.local_data_dir / self.config))
+            else:
+                from datasets import load_dataset
+
+                ds = load_dataset(self.repo_id, self.config, split=self.split)
             if self.max_samples is not None and self.max_samples < len(ds):
                 ds = ds.select(range(self.max_samples))
             self._dataset = ds.with_format("torch")
