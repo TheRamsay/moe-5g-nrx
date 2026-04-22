@@ -255,6 +255,7 @@ class HuggingFaceNRXBatchIterableDataset(IterableDataset[CachedNRXBatch]):
         self.base_seed = base_seed
         self.local_data_dir = Path(local_data_dir) if local_data_dir is not None else None
         # Pre-loaded in the main process: workers inherit via fork+CoW, no per-worker load
+        self._is_preloaded = preloaded_dataset is not None
         self._dataset = preloaded_dataset
         self._iteration_index = 0
 
@@ -291,17 +292,43 @@ class HuggingFaceNRXBatchIterableDataset(IterableDataset[CachedNRXBatch]):
         return len(self._get_or_create_dataset())
 
     def __iter__(self):
+        import numpy as np
+
         worker = torch.utils.data.get_worker_info()
         worker_id = worker.id if worker is not None else 0
         num_workers = worker.num_workers if worker is not None else 1
 
         dataset = self._get_or_create_dataset()
         iteration_seed = self._iteration_seed()
+        self._iteration_index += 1
+
+        if self._is_preloaded and self.shuffle:
+            # Preloaded in-memory dataset: shuffle via index permutation so workers
+            # never call dataset.shuffle() which would copy the full Arrow table (~10GB).
+            # dataset[list_of_indices] reads only batch-sized chunks — no full copy.
+            rng = np.random.RandomState(iteration_seed)
+            indices = rng.permutation(len(dataset))
+            worker_indices = indices[worker_id::num_workers]
+            stop = len(worker_indices) - self.batch_size + 1 if self.drop_last else len(worker_indices)
+            for i in range(0, stop, self.batch_size):
+                chunk = worker_indices[i : i + self.batch_size].tolist()
+                if self.drop_last and len(chunk) < self.batch_size:
+                    break
+                batch = dataset[chunk]
+                yield CachedNRXBatch(
+                    inputs=batch["inputs"],
+                    bit_labels=batch["bit_labels"],
+                    channel_target=batch["channel_target"],
+                    snr_db=batch["snr_db"].to(dtype=torch.float32),
+                    channel_profile=self.config,
+                    modulation="qam16",
+                )
+            return
+
         if self.shuffle:
             dataset = dataset.shuffle(seed=iteration_seed)
         if num_workers > 1:
             dataset = dataset.shard(num_shards=num_workers, index=worker_id, contiguous=True)
-        self._iteration_index += 1
 
         for batch in dataset.iter(batch_size=self.batch_size, drop_last_batch=self.drop_last):
             yield CachedNRXBatch(
