@@ -100,13 +100,18 @@ class Trainer:
         self._setup_validation()
         self._log_model_metadata()
 
-    def train_step(self, batch: tuple[torch.Tensor, torch.Tensor, torch.Tensor, str]) -> dict[str, Any]:
+    def train_step(
+        self,
+        batch: tuple[torch.Tensor, torch.Tensor, torch.Tensor, str],
+        *,
+        compute_error_metrics: bool = True,
+    ) -> dict[str, Any]:
         """Run a single optimization step."""
         self.model.train()
         features, targets, channel_targets, channel_profile = batch
-        features = features.to(self.device)
-        targets = targets.to(self.device)
-        channel_targets = channel_targets.to(self.device)
+        features = features.to(self.device, non_blocking=True)
+        targets = targets.to(self.device, non_blocking=True)
+        channel_targets = channel_targets.to(self.device, non_blocking=True)
 
         self.optimizer.zero_grad(set_to_none=True)
         with self._autocast_context():
@@ -129,35 +134,41 @@ class Trainer:
         if self.scheduler is not None:
             self.scheduler.step()
 
-        logits = outputs["logits"].float()
-        channel_estimate = outputs["channel_estimate"].float()
-        error_metrics = compute_batch_error_metrics(
-            logits,
-            targets,
-            bits_per_symbol=int(self.cfg.data.bits_per_symbol),
-            num_subcarriers=int(self.cfg.data.num_subcarriers),
-            num_ofdm_symbols=int(self.cfg.data.num_ofdm_symbols),
-        )
-        bit_errors_per_block = error_metrics.bit_errors_per_block
-
-        block_error_quantiles = torch.quantile(bit_errors_per_block, torch.tensor([0.5, 0.9], device=self.device))
-        channel_mse = self.channel_loss_fn(channel_estimate, channel_targets)
-
-        return {
+        metrics: dict[str, Any] = {
             "loss": float(loss.detach().cpu().item()),
-            "ber": float(error_metrics.ber.detach().cpu().item()),
-            "bler": float(error_metrics.bler.detach().cpu().item()),
-            "ser": float(error_metrics.ser.detach().cpu().item()),
-            "block_bit_errors_mean": float(bit_errors_per_block.mean().detach().cpu().item()),
-            "block_bit_errors_median": float(block_error_quantiles[0].detach().cpu().item()),
-            "block_bit_errors_p90": float(block_error_quantiles[1].detach().cpu().item()),
-            "block_bit_errors_max": float(bit_errors_per_block.max().detach().cpu().item()),
-            "channel_mse": float(channel_mse.detach().cpu().item()),
             "grad_norm": grad_norm,
-            "block_bit_errors_hist": wandb.Histogram(bit_errors_per_block.detach().cpu().numpy()),
             "channel_profile": str(channel_profile),
             **self._collect_aux_metrics(outputs),
         }
+
+        if compute_error_metrics:
+            logits = outputs["logits"].float()
+            channel_estimate = outputs["channel_estimate"].float()
+            error_metrics = compute_batch_error_metrics(
+                logits,
+                targets,
+                bits_per_symbol=int(self.cfg.data.bits_per_symbol),
+                num_subcarriers=int(self.cfg.data.num_subcarriers),
+                num_ofdm_symbols=int(self.cfg.data.num_ofdm_symbols),
+            )
+            bit_errors_per_block = error_metrics.bit_errors_per_block
+            block_error_quantiles = torch.quantile(bit_errors_per_block, torch.tensor([0.5, 0.9], device=self.device))
+            channel_mse = self.channel_loss_fn(channel_estimate, channel_targets)
+            metrics.update(
+                {
+                    "ber": float(error_metrics.ber.detach().cpu().item()),
+                    "bler": float(error_metrics.bler.detach().cpu().item()),
+                    "ser": float(error_metrics.ser.detach().cpu().item()),
+                    "block_bit_errors_mean": float(bit_errors_per_block.mean().detach().cpu().item()),
+                    "block_bit_errors_median": float(block_error_quantiles[0].detach().cpu().item()),
+                    "block_bit_errors_p90": float(block_error_quantiles[1].detach().cpu().item()),
+                    "block_bit_errors_max": float(bit_errors_per_block.max().detach().cpu().item()),
+                    "channel_mse": float(channel_mse.detach().cpu().item()),
+                    "block_bit_errors_hist": wandb.Histogram(bit_errors_per_block.detach().cpu().numpy()),
+                }
+            )
+
+        return metrics
 
     def train(self, train_loader, num_steps: int) -> None:
         """Main training loop with periodic metric logging and validation."""
@@ -189,8 +200,12 @@ class Trainer:
                 batch = next(data_iterator)
             data_time = time.perf_counter() - fetch_start
 
+            log_every_n = int(self.cfg.logging.log_every_n_steps)
+            next_step = self.global_step + 1
+            should_log = next_step == 1 or next_step % log_every_n == 0
+
             step_start = time.perf_counter()
-            metrics = self.train_step(batch)
+            metrics = self.train_step(batch, compute_error_metrics=should_log)
             step_time = time.perf_counter() - step_start
             iter_time = data_time + step_time
             batch_size = int(batch[0].shape[0])
@@ -205,9 +220,8 @@ class Trainer:
             progress.update(1)
             progress.set_postfix(
                 loss=f"{metrics['loss']:.4f}",
-                ber=f"{metrics['ber']:.4f}",
-                bler=f"{metrics['bler']:.4f}",
-                ser=f"{metrics['ser']:.4f}",
+                ber=f"{self._train_metric_ema.get('ber', 0.0):.4f}",
+                bler=f"{self._train_metric_ema.get('bler', 0.0):.4f}",
             )
 
             metrics["lr"] = float(self.optimizer.param_groups[0]["lr"])
