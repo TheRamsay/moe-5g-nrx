@@ -80,15 +80,19 @@ def _build_hf_loader(cfg: DictConfig, hf_repo: str):
         + (f" local_dir={local_data_dir}" if local_data_dir is not None else "")
     )
 
-    # Pre-load all profiles in the main process. DataLoader workers are forked
-    # after this point and inherit the loaded datasets via Linux CoW — no
-    # per-worker load, so RAM usage is O(profiles) not O(profiles * num_workers).
+    # For local Arrow dirs: workers load their own shard independently (no CoW issues).
+    # For HF hub: pre-load in main process so workers share via fork+CoW.
     preloaded = {}
-    for profile in profiles:
-        print(f"[INFO]   pre-loading {profile}...", flush=True)
-        preloaded[profile] = _preload_dataset(hf_repo, profile, "train", local_data_dir, max_samples_int)
-        n = len(preloaded[profile])
-        print(f"[INFO]   {profile}: {n} samples, {n // batch_size} batches/epoch")
+    if local_data_dir is None:
+        for profile in profiles:
+            print(f"[INFO]   pre-loading {profile} from HF hub...", flush=True)
+            preloaded[profile] = _preload_dataset(hf_repo, profile, "train", None, max_samples_int)
+            n = len(preloaded[profile])
+            print(f"[INFO]   {profile}: {n} samples, {n // batch_size} batches/epoch")
+    else:
+        for profile in profiles:
+            n_est = max_samples_int or 50000
+            print(f"[INFO]   {profile}: ~{n_est} samples, shard-per-worker from {local_data_dir}/{profile}/")
 
     loaders = {}
     for profile in profiles:
@@ -100,7 +104,9 @@ def _build_hf_loader(cfg: DictConfig, hf_repo: str):
             drop_last=True,
             shuffle=True,
             base_seed=int(cfg.runtime.seed),
-            preloaded_dataset=preloaded[profile],
+            max_samples=max_samples_int,
+            local_data_dir=local_data_dir,
+            preloaded_dataset=preloaded.get(profile),
         )
         loaders[profile] = DataLoader(
             ds,

@@ -289,47 +289,69 @@ class HuggingFaceNRXBatchIterableDataset(IterableDataset[CachedNRXBatch]):
 
     @property
     def num_samples(self) -> int:
+        if self._is_preloaded:
+            return len(self._dataset)
+        if self.max_samples is not None:
+            return self.max_samples
         return len(self._get_or_create_dataset())
 
-    def __iter__(self):
+    def _iter_numpy(self, dataset, iteration_seed: int | None, worker_id: int, num_workers: int):
+        """Iterate with numpy index shuffle — avoids full Arrow table copies on shuffle."""
         import numpy as np
 
+        rng = np.random.RandomState(iteration_seed)
+        indices = rng.permutation(len(dataset)) if self.shuffle else np.arange(len(dataset))
+        worker_indices = indices[worker_id::num_workers]
+        for i in range(0, len(worker_indices) - self.batch_size + 1, self.batch_size):
+            chunk = worker_indices[i : i + self.batch_size].tolist()
+            batch = dataset[chunk]
+            yield CachedNRXBatch(
+                inputs=batch["inputs"],
+                bit_labels=batch["bit_labels"],
+                channel_target=batch["channel_target"],
+                snr_db=batch["snr_db"].to(dtype=torch.float32),
+                channel_profile=self.config,
+                modulation="qam16",
+            )
+
+    def __iter__(self):
         worker = torch.utils.data.get_worker_info()
         worker_id = worker.id if worker is not None else 0
         num_workers = worker.num_workers if worker is not None else 1
 
-        dataset = self._get_or_create_dataset()
         iteration_seed = self._iteration_seed()
         self._iteration_index += 1
 
-        if self._is_preloaded and self.shuffle:
-            # Preloaded in-memory dataset: shuffle via index permutation so workers
-            # never call dataset.shuffle() which would copy the full Arrow table (~10GB).
-            # dataset[list_of_indices] reads only batch-sized chunks — no full copy.
-            rng = np.random.RandomState(iteration_seed)
-            indices = rng.permutation(len(dataset))
-            worker_indices = indices[worker_id::num_workers]
-            stop = len(worker_indices) - self.batch_size + 1 if self.drop_last else len(worker_indices)
-            for i in range(0, stop, self.batch_size):
-                chunk = worker_indices[i : i + self.batch_size].tolist()
-                if self.drop_last and len(chunk) < self.batch_size:
-                    break
-                batch = dataset[chunk]
-                yield CachedNRXBatch(
-                    inputs=batch["inputs"],
-                    bit_labels=batch["bit_labels"],
-                    channel_target=batch["channel_target"],
-                    snr_db=batch["snr_db"].to(dtype=torch.float32),
-                    channel_profile=self.config,
-                    modulation="qam16",
-                )
+        # Shard-per-worker: each worker independently loads its own pre-split shard.
+        # No shared parent memory → no CoW blowup → stable RAM across all epochs.
+        if self.local_data_dir is not None and not self._is_preloaded:
+            from datasets import load_from_disk
+
+            shard_path = self.local_data_dir / self.config / f"shard-{worker_id}"
+            if shard_path.exists():
+                ds = load_from_disk(str(shard_path), keep_in_memory=True).with_format("torch")
+            else:
+                # Fallback for non-sharded dirs: load full + slice manually.
+                ds = load_from_disk(str(self.local_data_dir / self.config), keep_in_memory=True).with_format("torch")
+                if self.max_samples is not None and self.max_samples < len(ds):
+                    ds = ds.select(range(self.max_samples))
+                if num_workers > 1:
+                    n = len(ds)
+                    ds = ds.select(range(worker_id * n // num_workers, (worker_id + 1) * n // num_workers))
+            yield from self._iter_numpy(ds, iteration_seed, 0, 1)
             return
 
+        # CoW pre-loaded path: dataset is in main process memory, shared via fork.
+        if self._is_preloaded:
+            yield from self._iter_numpy(self._dataset, iteration_seed, worker_id, num_workers)
+            return
+
+        # HF hub streaming path.
+        dataset = self._get_or_create_dataset()
         if self.shuffle:
             dataset = dataset.shuffle(seed=iteration_seed)
         if num_workers > 1:
             dataset = dataset.shard(num_shards=num_workers, index=worker_id, contiguous=True)
-
         for batch in dataset.iter(batch_size=self.batch_size, drop_last_batch=self.drop_last):
             yield CachedNRXBatch(
                 inputs=batch["inputs"],
