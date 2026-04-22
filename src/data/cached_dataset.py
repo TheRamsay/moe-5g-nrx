@@ -242,6 +242,7 @@ class HuggingFaceNRXBatchIterableDataset(IterableDataset[CachedNRXBatch]):
         shuffle: bool = True,
         base_seed: int | None = None,
         local_data_dir: str | Path | None = None,
+        preloaded_dataset=None,
     ) -> None:
         super().__init__()
         self.repo_id = repo_id
@@ -253,7 +254,8 @@ class HuggingFaceNRXBatchIterableDataset(IterableDataset[CachedNRXBatch]):
         self.shuffle = shuffle
         self.base_seed = base_seed
         self.local_data_dir = Path(local_data_dir) if local_data_dir is not None else None
-        self._dataset = None
+        # Pre-loaded in the main process: workers inherit via fork+CoW, no per-worker load
+        self._dataset = preloaded_dataset
         self._iteration_index = 0
 
     def _get_or_create_dataset(self):

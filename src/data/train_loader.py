@@ -2,11 +2,28 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from omegaconf import DictConfig, open_dict
 from torch.utils.data import DataLoader
 
 from .cached_dataset import HuggingFaceNRXBatchIterableDataset, collate_single_cached_batch
 from .torch_dataset import build_dataloader
+
+
+def _preload_dataset(hf_repo: str, profile: str, split: str, local_data_dir, max_samples):
+    """Load a dataset in the main process so workers inherit it via fork+CoW."""
+    if local_data_dir is not None:
+        from datasets import load_from_disk
+
+        ds = load_from_disk(str(Path(local_data_dir) / profile), keep_in_memory=True)
+    else:
+        from datasets import load_dataset
+
+        ds = load_dataset(hf_repo, profile, split=split)
+    if max_samples is not None and max_samples < len(ds):
+        ds = ds.select(range(max_samples))
+    return ds.with_format("torch")
 
 
 class _AlternatingLoader:
@@ -53,13 +70,25 @@ def _build_hf_loader(cfg: DictConfig, hf_repo: str):
     max_samples = cfg.training.get("hf_max_samples")
     local_data_dir = cfg.training.get("hf_train_data_dir")
 
+    max_samples_int = int(max_samples) if max_samples is not None else None
+
     print(
         "[INFO] HF train loader: "
         f"repo={hf_repo} profiles={profiles} batch_size={batch_size} "
         f"workers={num_workers}x{len(profiles)} prefetch={prefetch_factor}"
-        + (f" max_samples={max_samples}" if max_samples is not None else "")
+        + (f" max_samples={max_samples_int}" if max_samples_int is not None else "")
         + (f" local_dir={local_data_dir}" if local_data_dir is not None else "")
     )
+
+    # Pre-load all profiles in the main process. DataLoader workers are forked
+    # after this point and inherit the loaded datasets via Linux CoW — no
+    # per-worker load, so RAM usage is O(profiles) not O(profiles * num_workers).
+    preloaded = {}
+    for profile in profiles:
+        print(f"[INFO]   pre-loading {profile}...", flush=True)
+        preloaded[profile] = _preload_dataset(hf_repo, profile, "train", local_data_dir, max_samples_int)
+        n = len(preloaded[profile])
+        print(f"[INFO]   {profile}: {n} samples, {n // batch_size} batches/epoch")
 
     loaders = {}
     for profile in profiles:
@@ -71,10 +100,8 @@ def _build_hf_loader(cfg: DictConfig, hf_repo: str):
             drop_last=True,
             shuffle=True,
             base_seed=int(cfg.runtime.seed),
-            max_samples=int(max_samples) if max_samples is not None else None,
-            local_data_dir=local_data_dir,
+            preloaded_dataset=preloaded[profile],
         )
-        print(f"[INFO]   {profile}: {ds.num_samples} samples, {len(ds)} batches/epoch")
         loaders[profile] = DataLoader(
             ds,
             batch_size=None,
