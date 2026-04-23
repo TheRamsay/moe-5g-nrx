@@ -80,19 +80,17 @@ def _build_hf_loader(cfg: DictConfig, hf_repo: str):
         + (f" local_dir={local_data_dir}" if local_data_dir is not None else "")
     )
 
-    # For local Arrow dirs: workers load their own shard independently (no CoW issues).
-    # For HF hub: pre-load in main process so workers share via fork+CoW.
+    # Always pre-load in the main process so workers inherit data via fork+CoW.
+    # Workers never call load_from_disk, avoiding fork-lock deadlocks from inherited
+    # thread mutexes (TF/PyTorch backgrounds). Index-based shuffle in _iter_numpy
+    # reads Arrow pages without writing them, so CoW never triggers on the source data.
     preloaded = {}
-    if local_data_dir is None:
-        for profile in profiles:
-            print(f"[INFO]   pre-loading {profile} from HF hub...", flush=True)
-            preloaded[profile] = _preload_dataset(hf_repo, profile, "train", None, max_samples_int)
-            n = len(preloaded[profile])
-            print(f"[INFO]   {profile}: {n} samples, {n // batch_size} batches/epoch")
-    else:
-        for profile in profiles:
-            n_est = max_samples_int or 50000
-            print(f"[INFO]   {profile}: ~{n_est} samples, shard-per-worker from {local_data_dir}/{profile}/")
+    for profile in profiles:
+        src = "local dir" if local_data_dir is not None else "HF hub"
+        print(f"[INFO]   pre-loading {profile} from {src}...", flush=True)
+        preloaded[profile] = _preload_dataset(hf_repo, profile, "train", local_data_dir, max_samples_int)
+        n = len(preloaded[profile])
+        print(f"[INFO]   {profile}: {n} samples, {n // batch_size} batches/epoch")
 
     loaders = {}
     for profile in profiles:
@@ -116,7 +114,6 @@ def _build_hf_loader(cfg: DictConfig, hf_repo: str):
             collate_fn=collate_single_cached_batch,
             persistent_workers=num_workers > 0,
             prefetch_factor=prefetch_factor if num_workers > 0 else None,
-            multiprocessing_context="spawn" if num_workers > 0 else None,
         )
 
     if len(loaders) == 1:
