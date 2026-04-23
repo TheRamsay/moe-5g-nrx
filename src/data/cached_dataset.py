@@ -324,21 +324,27 @@ class HuggingFaceNRXBatchIterableDataset(IterableDataset[CachedNRXBatch]):
 
         # Shard-per-worker: each worker independently loads its own pre-split shard.
         # No shared parent memory → no CoW blowup → stable RAM across all epochs.
+        # Cache the shard so it is only loaded once per worker lifetime (not every epoch),
+        # avoiding the 2x memory spike that would otherwise occur at each epoch boundary.
         if self.local_data_dir is not None and not self._is_preloaded:
-            from datasets import load_from_disk
+            if not hasattr(self, "_shard_cache"):
+                from datasets import load_from_disk
 
-            shard_path = self.local_data_dir / self.config / f"shard-{worker_id}"
-            if shard_path.exists():
-                ds = load_from_disk(str(shard_path), keep_in_memory=True).with_format("torch")
-            else:
-                # Fallback for non-sharded dirs: load full + slice manually.
-                ds = load_from_disk(str(self.local_data_dir / self.config), keep_in_memory=True).with_format("torch")
-                if self.max_samples is not None and self.max_samples < len(ds):
-                    ds = ds.select(range(self.max_samples))
-                if num_workers > 1:
-                    n = len(ds)
-                    ds = ds.select(range(worker_id * n // num_workers, (worker_id + 1) * n // num_workers))
-            yield from self._iter_numpy(ds, iteration_seed, 0, 1)
+                shard_path = self.local_data_dir / self.config / f"shard-{worker_id}"
+                if shard_path.exists():
+                    ds = load_from_disk(str(shard_path), keep_in_memory=True).with_format("torch")
+                else:
+                    # Fallback for non-sharded dirs: load full + slice manually.
+                    ds = load_from_disk(str(self.local_data_dir / self.config), keep_in_memory=True).with_format(
+                        "torch"
+                    )
+                    if self.max_samples is not None and self.max_samples < len(ds):
+                        ds = ds.select(range(self.max_samples))
+                    if num_workers > 1:
+                        n = len(ds)
+                        ds = ds.select(range(worker_id * n // num_workers, (worker_id + 1) * n // num_workers))
+                self._shard_cache = ds
+            yield from self._iter_numpy(self._shard_cache, iteration_seed, 0, 1)
             return
 
         # CoW pre-loaded path: dataset is in main process memory, shared via fork.
