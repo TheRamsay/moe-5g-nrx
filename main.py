@@ -4,15 +4,27 @@ import os
 import random
 from pathlib import Path
 
-import hydra
-import numpy as np
-import torch
-from omegaconf import DictConfig
-
-from src.data import build_train_loader
-from src.training import Trainer
-
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["TF_USE_LEGACY_KERAS"] = "1"
+
+# Prevent TF from using the GPU. TF is pulled in by Sionna but is never used for
+# GPU compute when training from cached data. On CC9.0 nodes (H100) TF falls back
+# to PTX JIT compilation which blocks the CUDA driver and deadlocks PyTorch's
+# pin-memory thread — no training step ever fires.
+try:
+    import tensorflow as tf  # noqa: E402
+
+    tf.config.set_visible_devices([], "GPU")
+except Exception:
+    pass
+
+import hydra  # noqa: E402
+import numpy as np  # noqa: E402
+import torch  # noqa: E402
+from omegaconf import DictConfig  # noqa: E402
+
+from src.data import build_train_loader  # noqa: E402
+from src.training import Trainer  # noqa: E402
 
 
 def _set_seed(seed: int) -> None:
