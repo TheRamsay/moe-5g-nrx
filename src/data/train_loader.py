@@ -116,6 +116,7 @@ def _build_hf_loader(cfg: DictConfig, hf_repo: str):
             collate_fn=collate_single_cached_batch,
             persistent_workers=num_workers > 0,
             prefetch_factor=prefetch_factor if num_workers > 0 else None,
+            multiprocessing_context="spawn" if num_workers > 0 else None,
         )
 
     if len(loaders) == 1:
