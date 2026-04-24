@@ -1,6 +1,8 @@
-"""Benchmark different data loading strategies for mixed-profile training.
+"""Benchmark data loading for mixed-profile training (HF hub source).
 
-Uses the same HuggingFaceNRXBatchIterableDataset + DataLoader pattern as main.py.
+Historical: compared alternating vs chunked profile iteration. Kept for
+reproducibility; the training pipeline itself now preloads into RAM and
+runs with num_workers=0 (see src/data/train_loader.py).
 """
 
 import sys
@@ -10,9 +12,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import time
 
+from datasets import load_dataset
 from torch.utils.data import DataLoader
 
-from src.data.cached_dataset import HuggingFaceNRXBatchIterableDataset, collate_single_cached_batch
+from src.data.cached_dataset import PreloadedBatchedTrainDataset
 
 HF_REPO = "Vack0/moe-5g-nrx"
 PROFILES = ["uma", "tdlc"]
@@ -20,22 +23,21 @@ BATCH_SIZE = 128
 SEED = 67
 
 
+def _identity_collate(batch):
+    return batch[0] if isinstance(batch, list) else batch
+
+
 def make_loader(profile, num_workers=4, prefetch=1):
-    ds = HuggingFaceNRXBatchIterableDataset(
-        HF_REPO,
-        profile,
-        "train",
-        batch_size=BATCH_SIZE,
-        drop_last=True,
-        shuffle=True,
-        base_seed=SEED,
+    arrow = load_dataset(HF_REPO, profile, split="train").with_format("torch")
+    ds = PreloadedBatchedTrainDataset(
+        arrow, profile=profile, batch_size=BATCH_SIZE, drop_last=True, shuffle=True, base_seed=SEED
     )
     return DataLoader(
         ds,
         batch_size=None,
         num_workers=num_workers,
         pin_memory=True,
-        collate_fn=collate_single_cached_batch,
+        collate_fn=_identity_collate,
         persistent_workers=num_workers > 0,
         prefetch_factor=prefetch if num_workers > 0 else None,
     )

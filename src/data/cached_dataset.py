@@ -7,10 +7,10 @@ Supports two backends:
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset, IterableDataset
 
@@ -223,148 +223,68 @@ class LocalArrowNRXDataset(Dataset[CachedNRXSample]):
         return self._modulation
 
 
-class HuggingFaceNRXBatchIterableDataset(IterableDataset[CachedNRXBatch]):
-    """Batch-native HF dataset wrapper for training.
+class PreloadedBatchedTrainDataset(IterableDataset[CachedNRXBatch]):
+    """Batch-native iterable over an in-memory Arrow dataset (torch format).
 
-    This avoids per-sample Python object creation and `torch.stack` collation by
-    iterating over HuggingFace batches directly.
+    Expects the caller to have preloaded the dataset in the main process (see
+    `train_loader._preload_dataset`). Each epoch shuffles indices with numpy
+    — never copies the underlying Arrow table — and yields pre-batched tensors
+    via `dataset[index_list]`, which is cheaper than per-sample `__getitem__`
+    + `torch.stack` collation.
+
+    Designed for `num_workers=0`: the 22 GB training Arrow table does not fit
+    in RAM alongside multiple forked/spawned worker copies on a 32 GB node,
+    and at ~3k samples/s the GPU is the bottleneck anyway.
     """
 
     def __init__(
         self,
-        repo_id: str,
-        config: str,
-        split: str,
-        batch_size: int,
+        dataset,
         *,
-        max_samples: int | None = None,
+        profile: str,
+        batch_size: int,
         drop_last: bool = True,
         shuffle: bool = True,
         base_seed: int | None = None,
-        local_data_dir: str | Path | None = None,
-        preloaded_dataset=None,
     ) -> None:
         super().__init__()
-        self.repo_id = repo_id
-        self.config = config
-        self.split = split
+        self._dataset = dataset
+        self.profile = profile
         self.batch_size = batch_size
-        self.max_samples = max_samples
         self.drop_last = drop_last
         self.shuffle = shuffle
         self.base_seed = base_seed
-        self.local_data_dir = Path(local_data_dir) if local_data_dir is not None else None
-        # Pre-loaded in the main process: workers inherit via fork+CoW, no per-worker load
-        self._is_preloaded = preloaded_dataset is not None
-        self._dataset = preloaded_dataset
         self._iteration_index = 0
 
-    def _get_or_create_dataset(self):
-        if self._dataset is None:
-            if self.local_data_dir is not None:
-                from datasets import load_from_disk
+    def __len__(self) -> int:
+        n = len(self._dataset)
+        return n // self.batch_size if self.drop_last else (n + self.batch_size - 1) // self.batch_size
 
-                # keep_in_memory=True: loads shard into RAM so shuffle+iter are
-                # fast in-memory ops instead of random SSD seeks
-                ds = load_from_disk(str(self.local_data_dir / self.config), keep_in_memory=True)
-            else:
-                from datasets import load_dataset
-
-                ds = load_dataset(self.repo_id, self.config, split=self.split)
-            if self.max_samples is not None and self.max_samples < len(ds):
-                ds = ds.select(range(self.max_samples))
-            self._dataset = ds.with_format("torch")
-        return self._dataset
+    @property
+    def num_samples(self) -> int:
+        return len(self._dataset)
 
     def _iteration_seed(self) -> int | None:
         if self.base_seed is None:
             return None
         return self.base_seed + self._iteration_index * TRAIN_ITERATION_SEED_OFFSET
 
-    def __len__(self) -> int:
-        dataset = self._get_or_create_dataset()
-        if self.drop_last:
-            return len(dataset) // self.batch_size
-        return math.ceil(len(dataset) / self.batch_size)
-
-    @property
-    def num_samples(self) -> int:
-        if self._is_preloaded:
-            return len(self._dataset)
-        if self.max_samples is not None:
-            return self.max_samples
-        return len(self._get_or_create_dataset())
-
-    def _iter_numpy(self, dataset, iteration_seed: int | None, worker_id: int, num_workers: int):
-        """Iterate with numpy index shuffle — avoids full Arrow table copies on shuffle."""
-        import numpy as np
-
-        rng = np.random.RandomState(iteration_seed)
-        indices = rng.permutation(len(dataset)) if self.shuffle else np.arange(len(dataset))
-        worker_indices = indices[worker_id::num_workers]
-        for i in range(0, len(worker_indices) - self.batch_size + 1, self.batch_size):
-            chunk = worker_indices[i : i + self.batch_size].tolist()
-            batch = dataset[chunk]
-            yield CachedNRXBatch(
-                inputs=batch["inputs"],
-                bit_labels=batch["bit_labels"],
-                channel_target=batch["channel_target"],
-                snr_db=batch["snr_db"].to(dtype=torch.float32),
-                channel_profile=self.config,
-                modulation="qam16",
-            )
-
     def __iter__(self):
-        worker = torch.utils.data.get_worker_info()
-        worker_id = worker.id if worker is not None else 0
-        num_workers = worker.num_workers if worker is not None else 1
-
-        iteration_seed = self._iteration_seed()
+        rng = np.random.RandomState(self._iteration_seed())
+        n = len(self._dataset)
+        indices = rng.permutation(n) if self.shuffle else np.arange(n)
         self._iteration_index += 1
 
-        # Shard-per-worker: each worker independently loads its own pre-split shard.
-        # No shared parent memory → no CoW blowup → stable RAM across all epochs.
-        # Cache the shard so it is only loaded once per worker lifetime (not every epoch),
-        # avoiding the 2x memory spike that would otherwise occur at each epoch boundary.
-        if self.local_data_dir is not None and not self._is_preloaded:
-            if not hasattr(self, "_shard_cache"):
-                from datasets import load_from_disk
-
-                shard_path = self.local_data_dir / self.config / f"shard-{worker_id}"
-                if shard_path.exists():
-                    ds = load_from_disk(str(shard_path), keep_in_memory=True).with_format("torch")
-                else:
-                    # Fallback for non-sharded dirs: load full + slice manually.
-                    ds = load_from_disk(str(self.local_data_dir / self.config), keep_in_memory=True).with_format(
-                        "torch"
-                    )
-                    if self.max_samples is not None and self.max_samples < len(ds):
-                        ds = ds.select(range(self.max_samples))
-                    if num_workers > 1:
-                        n = len(ds)
-                        ds = ds.select(range(worker_id * n // num_workers, (worker_id + 1) * n // num_workers))
-                self._shard_cache = ds
-            yield from self._iter_numpy(self._shard_cache, iteration_seed, 0, 1)
-            return
-
-        # CoW pre-loaded path: dataset is in main process memory, shared via fork.
-        if self._is_preloaded:
-            yield from self._iter_numpy(self._dataset, iteration_seed, worker_id, num_workers)
-            return
-
-        # HF hub streaming path.
-        dataset = self._get_or_create_dataset()
-        if self.shuffle:
-            dataset = dataset.shuffle(seed=iteration_seed)
-        if num_workers > 1:
-            dataset = dataset.shard(num_shards=num_workers, index=worker_id, contiguous=True)
-        for batch in dataset.iter(batch_size=self.batch_size, drop_last_batch=self.drop_last):
+        end = n - self.batch_size + 1 if self.drop_last else n
+        for i in range(0, end, self.batch_size):
+            chunk = indices[i : i + self.batch_size].tolist()
+            batch = self._dataset[chunk]
             yield CachedNRXBatch(
                 inputs=batch["inputs"],
                 bit_labels=batch["bit_labels"],
                 channel_target=batch["channel_target"],
                 snr_db=batch["snr_db"].to(dtype=torch.float32),
-                channel_profile=self.config,
+                channel_profile=self.profile,
                 modulation="qam16",
             )
 
@@ -379,14 +299,6 @@ def collate_cached_batch(samples: list[CachedNRXSample]) -> CachedNRXBatch:
         channel_profile=samples[0].channel_profile,
         modulation=samples[0].modulation,
     )
-
-
-def collate_single_cached_batch(batch: CachedNRXBatch | list[CachedNRXBatch]) -> CachedNRXBatch:
-    """Pass through a pre-batched cached batch from an IterableDataset."""
-
-    if isinstance(batch, list):
-        return batch[0]
-    return batch
 
 
 def build_cached_dataloader(
