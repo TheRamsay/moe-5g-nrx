@@ -1,0 +1,52 @@
+# @package _global_
+# Experiment 30: Router channel-feature ablation
+#
+# Replaces the router's input (pooled stem features) with fresh Gaussian noise
+# per forward pass. The router cannot learn input-dependent routing, so any
+# heterogeneous routing must come from architecture/losses, not channel cues.
+#
+# Test for the central "channel-aware routing" claim:
+#   - if BLER stays close to exp26 (α=2e-3 winner) → channel features don't matter
+#   - if BLER craters / routing collapses → channel features are load-bearing
+#
+# Same recipe as exp26 (asym warm, α=2e-3, bs=128, 12k steps, s67) so the
+# comparison is one-variable.
+
+defaults:
+  - override /model: moe_nl
+  - override /dataset: mixed
+
+experiment:
+  batch_name: moe-ablation-router-random-v1
+  exp_name: moe_ablation_router_random_a2e3_s67
+  tags: [moe, ablation, router-random, asym-warm, hf, simo-1x4, 16qam, nl-range]
+  notes: >
+    Channel-aware ablation: router fed pure noise. Otherwise identical to
+    exp26 (winning recipe). Tests whether channel-quality features drive routing.
+  study_slug: 2026-04-25-moe-ablation-router-random-v1
+  study_path: experiments/2026-04-25-moe-ablation-router-random-v1
+  question: Do channel-quality features in the router input actually drive routing decisions?
+
+model:
+  router:
+    input_mode: random
+  compute:
+    flops_penalty_alpha: 2e-3
+    load_balance_beta: 0.1
+
+training:
+  hf_dataset: Vack0/moe-5g-nrx
+  batch_size: 128
+  learning_rate: 1e-3
+  weight_decay: 1e-4
+  max_steps: 12000
+  freeze_experts: false
+  warm_start:
+    stem_checkpoint: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best"
+    experts:
+      nano: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_nano_final20k_constant_lr_s67-aos4hhid:best"
+      small: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_small_final20k_constant_lr_s67-kivdz4qu:best"
+
+validation:
+  every_n_steps: 500
+  snr_bins: 5

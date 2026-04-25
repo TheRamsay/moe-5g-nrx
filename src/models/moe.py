@@ -73,6 +73,7 @@ class MoENRX(nn.Module):
         temperature: float = 1.0,
         min_temperature: float = 0.5,
         use_input_statistics: bool = False,
+        router_input_mode: str = "channel_aware",
         flops_normalizer: float = 1.0,
         **kwargs,
     ) -> None:
@@ -102,6 +103,9 @@ class MoENRX(nn.Module):
         self.temperature = float(temperature)
         self.min_temperature = float(min_temperature)
         self.use_input_statistics = use_input_statistics
+        if router_input_mode not in ("channel_aware", "random"):
+            raise ValueError(f"router_input_mode must be 'channel_aware' or 'random', got {router_input_mode!r}")
+        self.router_input_mode = router_input_mode
         self.flops_normalizer = max(float(flops_normalizer), 1.0)
 
         stem_layers: list[nn.Module] = []
@@ -176,10 +180,20 @@ class MoENRX(nn.Module):
         pilot_distance = self.pilot_distance_features.to(dtype=x.dtype).expand(x.shape[0], -1, -1, -1)
         shared_state = self.stem(torch.cat([x, pilot_distance], dim=1))
 
-        router_features = [shared_state.mean(dim=(2, 3)), shared_state.amax(dim=(2, 3))]
-        if self.use_input_statistics:
-            router_features.append(self._input_statistics(x))
-        router_logits = self.router(torch.cat(router_features, dim=1))
+        if self.router_input_mode == "random":
+            # Channel-aware ablation: feed pure noise. Router cannot learn input-dependent
+            # routing, so any heterogeneous behavior must come from architecture/losses,
+            # not channel features. Test for the central "channel-aware routing" claim.
+            router_input_dim = 2 * self.state_dim + (3 if self.use_input_statistics else 0)
+            router_features_tensor = torch.randn(
+                shared_state.shape[0], router_input_dim, device=shared_state.device, dtype=shared_state.dtype
+            )
+        else:
+            router_features = [shared_state.mean(dim=(2, 3)), shared_state.amax(dim=(2, 3))]
+            if self.use_input_statistics:
+                router_features.append(self._input_statistics(x))
+            router_features_tensor = torch.cat(router_features, dim=1)
+        router_logits = self.router(router_features_tensor)
         router_probs = torch.softmax(router_logits, dim=-1)
         selected_expert_index = torch.argmax(router_probs, dim=-1)
 

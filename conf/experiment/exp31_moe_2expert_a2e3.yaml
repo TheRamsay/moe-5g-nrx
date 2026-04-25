@@ -1,0 +1,58 @@
+# @package _global_
+# Experiment 31: 2-expert ablation — drop nano
+#
+# Sweep finding: at α=2e-3 nano gets only 15% TDLC / 48% UMA; at α=5e-3 it
+# starves entirely. Question: does nano carry weight or is small+large enough?
+#
+# Drops the nano expert. Same warm-start for stem+small (no nano), same α and
+# β. Compare BLER and FLOPs to exp26.
+#   - if avg BLER ≈ exp26 → nano was dead weight, simpler model wins
+#   - if avg BLER worse → nano absorbs hopeless low-SNR samples, justifies 3-expert design
+
+defaults:
+  - override /model: moe_nl
+  - override /dataset: mixed
+
+experiment:
+  batch_name: moe-ablation-2expert-v1
+  exp_name: moe_ablation_2expert_a2e3_s67
+  tags: [moe, ablation, two-expert, asym-warm, hf, simo-1x4, 16qam, nl-range]
+  notes: >
+    2-expert ablation: drops nano, keeps small+large. Otherwise identical to
+    exp26 (winning recipe). Tests whether nano contributes meaningfully.
+  study_slug: 2026-04-25-moe-ablation-2expert-v1
+  study_path: experiments/2026-04-25-moe-ablation-2expert-v1
+  question: Does nano contribute meaningfully or is small+large sufficient?
+
+model:
+  experts:
+    nano: null  # drop nano
+    small:
+      num_cnn_blocks: 8
+      block_hidden_dim: 32
+      readout_hidden_dim: 96
+    large:
+      num_cnn_blocks: 8
+      block_hidden_dim: 64
+      readout_hidden_dim: 128
+  compute:
+    flops_penalty_alpha: 2e-3
+    load_balance_beta: 0.1
+
+training:
+  hf_dataset: Vack0/moe-5g-nrx
+  batch_size: 128
+  learning_rate: 1e-3
+  weight_decay: 1e-4
+  max_steps: 12000
+  freeze_experts: false
+  warm_start:
+    stem_checkpoint: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best"
+    experts:
+      small: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_small_final20k_constant_lr_s67-kivdz4qu:best"
+      # large: random init (asym warm)
+      # nano: dropped entirely
+
+validation:
+  every_n_steps: 500
+  snr_bins: 5

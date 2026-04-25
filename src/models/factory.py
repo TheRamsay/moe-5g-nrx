@@ -60,13 +60,16 @@ def build_model_from_config(cfg: DictConfig | dict[str, Any]):
             activation=str(_section_get(shared_stem_cfg, "activation", "relu")),
             pilot_symbol_indices=list(_section_get(shared_stem_cfg, "pilot_symbol_indices", [2, 11])),
             pilot_subcarrier_spacing=int(_section_get(shared_stem_cfg, "pilot_subcarrier_spacing", 2)),
-            experts_config=_section_get(model_cfg, "experts", {}),
+            experts_config={
+                name: cfg for name, cfg in dict(_section_get(model_cfg, "experts", {})).items() if cfg is not None
+            },
             router_hidden_dim=int(_section_get(router_cfg, "hidden_dim", 64)),
             training_gate=str(_section_get(router_cfg, "training_gate", "gumbel_softmax")),
             inference_gate=str(_section_get(router_cfg, "inference_gate", "top1")),
             temperature=float(_section_get(router_cfg, "temperature", 1.0)),
             min_temperature=float(_section_get(router_cfg, "min_temperature", 0.5)),
             use_input_statistics=bool(_section_get(router_cfg, "use_input_statistics", False)),
+            router_input_mode=str(_section_get(router_cfg, "input_mode", "channel_aware")),
             flops_normalizer=float(_section_get(compute_cfg, "flops_normalizer", 1.0)),
             **common_kwargs,
         )
