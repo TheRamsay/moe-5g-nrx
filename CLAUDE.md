@@ -197,10 +197,12 @@ Shared stem (285M FLOPs, always paid) + channel-aware router + 3 heterogeneous e
 | 7 | **Large-warmup stabilization** (exp32/33/34) | ✅ done; over-corrects to 100% large in 3/3 seeds (negative result) |
 | 8 | **β-warmup stabilization** (exp35/36/37) | ✅ done; mean BLER worse than baseline (negative result) |
 | 9 | **Static + SNR-oracle cascade baseline** (D analysis) | ✅ done; exp26 on Pareto frontier; oracle cascade slightly better at same BLER |
-| 10 | **DeepMIMO few-shot fine-tune** | 📝 drafted (`experiments/2026-04-26-deepmimo-fewshot-finetune-v1/`); not yet fired |
-| 11 | Doc cleanup: checkpoint_report (§4 dataset, mean±std, ablations, OOD section, latency) | not started |
-| 12 | (Optional A+) Wall-clock latency on CPU/GPU | not started |
-| 13 | (Optional A+) MEAN reimplementation as homogeneous-expert baseline | cut — too time-expensive |
+| 10 | **DeepMIMO few-shot fine-tune** (Stage 1+2 done; Stage 3 OOD eval pending) | 🟡 dense_large fine-tune ✅ done (`go74dlm7`); exp26 fine-tune queued; OOD eval after |
+| 11 | **Wall-clock latency benchmark** | 🟡 queued (job 19473464) |
+| 12 | **Per-SNR routing visualization** | ✅ done (`docs/figures/per_snr_routing_2zboo1rh.png` after commit) |
+| 13 | **Channel-feature visualization** (PCA-2D, dropped sklearn) | 🟡 running (job 19473435) |
+| 14 | Doc cleanup: checkpoint_report (§4 dataset, mean±std, ablations, OOD section, latency) | not started |
+| 15 | (Optional A+) MEAN reimplementation as homogeneous-expert baseline | cut — too time-expensive |
 
 **Cut**: difficulty-guided routing, dataloader Arrow→torch refactor,
 re-baselining dense at bs=512. None move the rubric.
