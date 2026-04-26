@@ -39,23 +39,47 @@ bash submit.sh qsub
 
 ## Jobs
 
-| Exp | Job ID | W&B run | Status |
-|---|---|---|---|
-| exp31 | _tbd_ | _tbd_ | submitted _tbd_ |
+| Exp | Train Job | Train W&B | Eval W&B | Status |
+|---|---|---|---|---|
+| exp31 | 19459438 | 5c0kshem | nyvfkxl0 | done |
 
-## Results — to fill in after eval
+## Results (test set, best checkpoint = step 12000)
 
-| Run | Avg BLER | TDLC routing | UMA routing | Avg FLOPs % |
-|---|---:|---|---|---:|
-| exp26 (3-expert) | 0.902 | 44/15/40 (l/n/s) | 26/48/26 (l/n/s) | 56% |
-| exp31 (2-expert) | _tbd_ | _tbd_ (l/s) | _tbd_ (l/s) | _tbd_ |
+| Run | TDLC BLER | UMA BLER | **Avg BLER** | TDLC routing | UMA routing | TDLC FLOPs % | UMA FLOPs % |
+|---|---:|---:|---:|---|---|---:|---:|
+| exp26 (3-expert) | 0.867 | 0.937 | **0.902** | 44/15/40 (l/n/s) | 26/48/26 (l/n/s) | 65% | 47% |
+| **exp31 (2-expert)** | **0.878** | **0.940** | **0.909** | 38/62 (l/s) | 37/63 (l/s) | 65% | 65% |
 
-## Decision Criteria
+## Verdict — nano earns its keep
 
-| Outcome | Interpretation |
-|---|---|
-| 2-expert ≈ 3-expert BLER & FLOPs | Nano is dead weight. Update arch story to "2 heterogeneous experts is enough." |
-| 2-expert worse BLER, similar FLOPs | Nano absorbs hopeless low-SNR samples. **Justifies 3-expert design.** |
-| 2-expert lower FLOPs, slightly worse BLER | Real Pareto tradeoff — both architectures valid. |
+Without nano, the router splits roughly 38/62 large/small on both profiles.
+BLER worsens by 0.7 pp avg (TDLC: +1.1 pp, UMA: +0.3 pp) and **UMa FLOPs
+ratio jumps from 47% to 65%** — small now absorbs the hopeless low-SNR
+samples that nano used to handle for ~1/3 the compute, so the average compute
+cost climbs.
 
-Strengthens the architecture justification either way.
+The TDL-C FLOPs ratio is unchanged (65% both architectures) because TDLC
+already used nano sparingly (15%) — the change there is pure BLER, not
+compute. The compute story plays out on UMa, where nano was carrying ~half
+the routing decisions.
+
+## Decision criteria — outcome
+
+- ✅ **2-expert worse BLER + more FLOPs (on UMa)** → Nano absorbs hopeless
+  low-SNR samples. **Justifies the 3-expert design.**
+
+The 3-expert MoE is the better operating point. 2-expert is also a valid
+Pareto point but strictly dominated on BLER and on (UMa) FLOPs.
+
+## How this strengthens the report
+
+Without this ablation, a reviewer can ask: "Your sweep showed nano starves
+at high α and only gets 15% at the winning α — does it actually contribute?
+Why not just use small+large?"
+
+With this ablation, the answer is:
+
+> "We tested the 2-expert (small+large) variant at the same α=2e-3 recipe.
+> It performs 0.7 pp worse on BLER and uses 18 pp more FLOPs on UMa, because
+> small must now handle low-SNR samples that nano was absorbing more
+> efficiently. The 3-expert design is justified."

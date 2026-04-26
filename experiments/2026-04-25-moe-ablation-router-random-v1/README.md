@@ -44,23 +44,48 @@ bash submit.sh qsub
 
 ## Jobs
 
-| Exp | Job ID | W&B run | Status |
-|---|---|---|---|
-| exp30 | _tbd_ | _tbd_ | submitted _tbd_ |
+| Exp | Train Job | Train W&B | Eval W&B | Status |
+|---|---|---|---|---|
+| exp30 | 19459437 | cd2w6l31 | ag3qbw52 | done |
 
-## Results — to fill in after eval
+## Results (test set, best checkpoint = step 6500)
 
-| Run | Avg BLER | TDLC routing l/n/s | UMA routing l/n/s | Avg FLOPs % |
-|---|---:|---|---|---:|
-| exp26 (channel-aware) | 0.902 | 44/15/40 | 26/48/26 | 56% |
-| exp30 (random input) | _tbd_ | _tbd_ | _tbd_ | _tbd_ |
+| Run | TDLC BLER | UMA BLER | **Avg BLER** | TDLC routing l/n/s | UMA routing l/n/s | TDLC FLOPs % | UMA FLOPs % |
+|---|---:|---:|---:|---|---|---:|---:|
+| exp26 (channel-aware) | 0.867 | 0.937 | **0.902** | 44/15/40 | 26/48/26 | 65% | 47% |
+| **exp30 (random input)** | **0.965** | **0.972** | **0.968** | **0/11/89** | **0/11/89** | **41%** | **41%** |
 
-## Decision Criteria
+## Verdict — channel-aware features are load-bearing
 
-| Outcome | Interpretation |
-|---|---|
-| Random ≈ exp26 BLER (within 0.5 pp) | Channel-aware claim is **wrong**. Architecture/losses do all the work. Reframe story honestly. |
-| Random worse BLER, routing collapses | Channel features are load-bearing. **Confirms central claim.** |
-| Random worse BLER, routing still heterogeneous | Architecture biases toward heterogeneous routing; channel features improve it. Partial claim. |
+Random-input router collapses to **always-pick-small** (0% large, 11% nano,
+89% small on both profiles) and BLER craters by **6.6 pp avg** (TDLC: +9.8 pp,
+UMA: +3.5 pp). Without channel-quality information the router cannot decide
+when to invest in the expensive large expert — it defaults to the
+"cheap-but-OK" option, which is correct on UMa (mostly easy) but catastrophic
+on TDL-C (where waterfall samples need large).
 
-Either outcome is publishable. The honest result strengthens the report.
+Best checkpoint at step 6500 (model never recovered). Earlier training-EMA
+snapshots showed ~33/33/33 routing because the fresh-noise input gives
+roughly uniform argmax — but the FLOPs penalty pulled the actual policy
+toward small over training.
+
+## Decision criteria — outcome
+
+- ✅ **Random worse BLER, routing collapses** → Channel features are
+  load-bearing. **Central claim confirmed.**
+
+This is the strongest possible outcome of the ablation. It directly supports
+the "compute-aware MoE uses channel-quality features to decide where to
+spend FLOPs" framing. The contrast — same architecture, same losses, same
+warm-start, only the router input changed — isolates channel-aware as the
+operative variable.
+
+## How this strengthens the report
+
+Previously the channel-aware claim was framed as "the router takes pooled
+stem features." With this ablation we can now say:
+
+> "We confirmed via ablation that channel-quality features in the router
+> input are load-bearing for compute-aware routing: replacing them with
+> Gaussian noise causes the router to collapse onto a single cheap expert
+> and BLER to degrade by 6.6 pp on average."

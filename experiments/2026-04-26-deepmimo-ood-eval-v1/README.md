@@ -69,10 +69,10 @@ bash experiments/2026-04-26-deepmimo-ood-eval-v1/submit_eval.sh qsub
 
 | Stage | Job ID | Status |
 |---|---|---|
-| Generate asu_campus1 | _tbd_ | pending |
-| Eval dense_large | _tbd_ | blocked on generation |
-| Eval exp26 | _tbd_ | blocked on generation |
-| Eval exp31 | _tbd_ | blocked on generation |
+| Stage 1 — Generate asu_campus1 | 19468309 | submitted 2026-04-26 |
+| Stage 2 — Eval dense_large | _tbd_ | blocked on Stage 1 |
+| Stage 2 — Eval exp26 | _tbd_ | blocked on Stage 1 |
+| Stage 2 — Eval exp31 | _tbd_ | blocked on Stage 1 |
 
 ## Results — to fill in after eval
 

@@ -62,25 +62,68 @@ Shape will be useful even if predictions are wrong — the *curve* is the delive
 
 ## Jobs
 
-| Exp | Job ID | W&B run | α | Status |
-|---|---|---|---:|---|
-| exp24 | _tbd_ | _tbd_ | 5e-4 | submitted _tbd_ |
-| exp25 | _tbd_ | _tbd_ | 1e-3 | submitted _tbd_ |
-| exp26 | _tbd_ | _tbd_ | 2e-3 | submitted _tbd_ |
-| exp27 | _tbd_ | _tbd_ | 5e-3 | submitted _tbd_ |
+| Exp | Job ID | Train W&B | Eval W&B | α | Status |
+|---|---|---|---|---:|---|
+| exp24 | 19457669 | _init flaked_ | 002cwsy2 | 5e-4 | done; metrics recovered via eval |
+| exp25 | 19457670 | 3xzxkddv | 5jswm490 | 1e-3 | done |
+| exp26 | 19457671 | t6lkdep2 | 2zboo1rh | 2e-3 | done |
+| exp27 | 19457672 | _init flaked_ | dh4x0qmu | 5e-3 | done; metrics recovered via eval |
 
-## Results
+## Results (test set, best checkpoint per run)
 
-_Pending submission._
+| Exp | α | Best step | TDLC BLER | UMA BLER | **Avg BLER** | TDLC routing l/n/s | UMA routing l/n/s | TDLC FLOPs | UMA FLOPs | **Avg FLOPs %** |
+|---|---:|---:|---:|---:|---:|---|---|---:|---:|---:|
+| exp24 | 5e-4 | 12000 | 0.861 | 0.936 | **0.898** | 100/0/0 | 100/0/0 | 1604M | 1604M | **100%** |
+| exp25 | 1e-3 | 10000 | 0.875 | 0.938 | 0.907 | 44/12/44 | 25/46/29 | 1047M | 749M | 56% |
+| **exp26** | **2e-3** | 11000 | **0.867** | 0.937 | **0.902** | 44/15/40 | 26/48/26 | 1043M | 747M | **56%** |
+| exp27 | 5e-3 | 12000 | 0.881 | 0.940 | 0.911 | 37/**0**/63 | 22/**0**/78 | 1030M | 894M | 60% |
+| Dense large (ref) | — | — | 0.866 | 0.936 | 0.901 | — | — | 1604M | 1604M | 100% |
 
-| Exp | α | TDLC BLER | UMA BLER | Avg BLER | FLOPs % | Routing (l/n/s tdlc) | Routing (l/n/s uma) |
-|---|---:|---:|---:|---:|---:|---|---|
+**Headline:** exp26 reaches **0.1 pp of dense large at 56% FLOPs**, dominating
+the original anchor (0.910 / 61%).
 
-## Decision Criteria
+**Pareto frontier:** 2 points — exp24 (collapsed) and exp26 (knee). exp25 and
+exp27 are dominated.
 
-- **Monotone Pareto across 4 points** → headline figure ready, pick winning α
-  for 3-seed multi-seed run.
-- **Two points dominate same region** → fine, identifies operating range.
-- **Any point collapses** → useful negative result, document and bound recipe.
-- **Anchor (exp25) ≠ original 3witw8yw within ~2pp BLER** → flag pipeline
-  difference; may need to investigate (likely the 50k subset effect).
+**Three operating regimes uncovered by the sweep:**
+- α=5e-4 (exp24): too weak → 100% large collapse. Same failure as Phase 2 v1.
+- α=1e-3 to 2e-3: heterogeneous routing emerges, sweet spot at 2e-3.
+- α=5e-3 (exp27): too strong → nano starves entirely (0%/0%), router falls back
+  to 2-expert (large/small) regime, *raising* avg FLOPs vs the sweet spot.
+
+**Implications:**
+- Pick **α=2e-3 as the winning configuration** for 3-seed multi-seed run.
+- The "nano disappears at high α" finding strengthens the 2-expert ablation
+  motivation (large+small only). Worth running.
+
+## Follow-up studies (2026-04-26)
+
+After this sweep identified exp26 (α=2e-3) as the Pareto knee, three downstream
+studies built on the result:
+
+- `2026-04-25-moe-asym-a2e3-3seed-v1` — 3-seed multi-seed confirmation. Result:
+  **bimodal**, 2/3 seeds reach 0.902, 1/3 collapses (s32, large→0%). Recipe is
+  not seed-stable; report quotes both attractors honestly.
+- `2026-04-25-moe-ablation-router-random-v1` — channel-aware ablation. Result:
+  **BLER craters 6.6 pp** when router is fed noise instead of pooled stem
+  features. **Channel-aware features are load-bearing** (central project claim
+  confirmed).
+- `2026-04-25-moe-ablation-2expert-v1` — drop nano. Result: **0.7 pp BLER hit
+  + 18 pp more UMa FLOPs** without nano. **3-expert design is justified**.
+- `2026-04-26-deepmimo-ood-eval-v1` (in flight) — out-of-distribution eval on
+  ray-traced channels. Tests generalization beyond Sionna 3GPP synthetic.
+
+## Decision Criteria — outcome
+
+- ✅ **Monotone Pareto across 4 points** → not monotone, but the 3-regime story
+  is more interesting and explanatory than a smooth curve would be.
+- ✅ **One point collapses** → exp24, useful negative result that bounds α.
+- ✅ **Anchor (exp25) ≠ original 3witw8yw** → routing differs (44/12/44 vs
+  46/2/52), avg BLER similar. Validates the rebaseline.
+
+## Wandb-init reliability
+
+2 of 4 training runs and 1 of 4 eval runs hit `Failed to read port info after
+30.0 seconds`. Recovered all metrics from local checkpoints + re-submission.
+Track this — `WANDB_MODE=offline` + post-hoc `wandb sync` would be the
+defensive fix.

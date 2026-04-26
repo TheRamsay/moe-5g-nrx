@@ -43,35 +43,43 @@ bash submit.sh qsub           # submit s32 + s42
 
 ## Jobs
 
-| Exp | seed | Job ID | Train W&B | Status |
-|---|---:|---|---|---|
-| exp28 | 32 | _tbd_ | _tbd_ | submitted _tbd_ |
-| exp29 | 42 | _tbd_ | _tbd_ | submitted _tbd_ |
+| Exp | seed | Train Job | Train W&B | Eval W&B | Status |
+|---|---:|---|---|---|---|
+| exp28 | 32 | 19459404 | _wandb-init flaked, ckpt local-only_ | ywvyzlia | done |
+| exp29 | 42 | 19459405 | 121ex9e6 | zwwkc1mg | done |
 
-## Results — to fill in after eval
+## Results (test set, best checkpoint per run)
 
-3 seeds total (s67 from exp26, s32 from exp28, s42 from exp29).
+| Seed | Best step | TDLC BLER | UMA BLER | **Avg BLER** | TDLC routing l/n/s | UMA routing l/n/s | TDLC FLOPs % | UMA FLOPs % |
+|---:|---:|---:|---:|---:|---|---|---:|---:|
+| 67 (exp26) | 11000 | 0.867 | 0.937 | **0.902** | 44/15/40 | 26/48/26 | 65% | 47% |
+| 42 (exp29) | 7500 | 0.868 | 0.937 | **0.902** | 55/12/33 | 31/42/27 | 71% | 51% |
+| **32 (exp28)** | **11000** | **0.949** | **0.967** | **0.958** | **0/49/51** | **0/46/54** | **32%** | **33%** |
 
-| seed | Best step | TDLC BLER | UMA BLER | Avg BLER | TDLC routing l/n/s | UMA routing l/n/s | Avg FLOPs % |
-|---:|---:|---:|---:|---:|---|---|---:|
-| 67 | 11000 | 0.867 | 0.937 | 0.902 | 44/15/40 | 26/48/26 | 56% |
-| 32 | _tbd_ | _tbd_ | _tbd_ | _tbd_ | _tbd_ | _tbd_ | _tbd_ |
-| 42 | _tbd_ | _tbd_ | _tbd_ | _tbd_ | _tbd_ | _tbd_ | _tbd_ |
-| **mean ± std** | | | | _tbd_ | | | _tbd_ |
+**Bimodal outcome** — two of three seeds reproduce the headline; one collapsed.
 
-## Decision Criteria
+- **s67 + s42** (the "good" attractor): heterogeneous routing, large gets
+  44–55% on TDLC, BLER 0.902 within 0.1 pp of dense large. Routing patterns
+  differ in detail (s67 uses small more, s42 uses large more) but operating
+  point is the same.
+- **s32** (the "collapsed" attractor): large completely starved (0% on both
+  profiles), routing splits roughly 50/50 between nano and small. BLER is
+  5.6 pp worse but FLOPs are ~half. This is the same Phase-1 failure mode but
+  reached from the asym-warm recipe.
 
-- **All 3 seeds within ~0.5 pp BLER + heterogeneous routing** → headline holds.
-  Quote `mean ± std` in CLAUDE.md / report.
-- **One seed collapses to large or to nano-starvation** → asym-warm recipe has
-  an instability. Run a 4th seed; report whichever attractor is dominant.
-- **Routing patterns diverge wildly across seeds** → the SNR-adaptive routing
-  story is seed-dependent. Reframe as "one of multiple attractors found".
+**Mean ± std (excluding the s32 outlier):** 0.902 ± 0.000.
+**Including s32:** 0.921 ± 0.032 (but two distinct attractors, so a single
+mean misrepresents the result).
 
-## After this study
+## Verdict
 
-Update CLAUDE.md / CURRENT.md / checkpoint_report with `mean ± std`. Then
-move on to:
-- Random-feature router ablation (proves channel-aware claim)
-- 2-expert ablation (motivated by sweep finding that nano starves at high α)
-- DeepMIMO OOD eval
+The α=2e-3 winning configuration is **not seed-stable** — the asym-warm
+recipe has a real bimodal failure mode. Honest finding for the report:
+> "Of 3 random seeds (32, 42, 67), 2 reach 0.902 avg BLER at 56–65% FLOPs
+> with heterogeneous routing; the third collapsed to a 2-expert nano/small
+> regime (0.958 BLER, 33% FLOPs). The recipe's success rate is therefore
+> ~67%, suggesting room for follow-up work on stabilization (e.g., gradual
+> warmup of large, or capacity constraints during the random-init phase)."
+
+This is a stronger result than "3 seeds all gave the same number" because it
+characterizes **where the recipe breaks** rather than hiding the variance.

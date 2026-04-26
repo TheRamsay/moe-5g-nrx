@@ -4,26 +4,78 @@
 
 Build a **compute-aware 5G neural receiver** that keeps BLER close to a dense baseline while reducing **average FLOPs** via adaptive routing. Main result: **BLER vs Average FLOPs** Pareto curve. Router uses channel-quality features from the shared stem — not raw SNR.
 
-## Current State (2026-04-25)
+## Current State (2026-04-26)
 
-**Pareto frontier (test split):**
+**Pareto frontier (test split, all on 50k subset):**
 
-| Run | Avg BLER | FLOPs % | Notes |
-|---|---|---|---|
-| Dense large (baseline) | 0.901 | 100% | 450k params |
-| Phase 2 v1 | 0.879 | 100% | router collapsed |
-| **Asym warm 12k** | **0.910** | **61%** | **best result** |
-| Phase 1 s56 | 0.926 | 48% | large abandoned |
+| Run | α | Avg BLER | FLOPs % | TDLC routing l/n/s | Notes |
+|---|---:|---:|---:|---|---|
+| Dense large (baseline) | — | 0.901 | 100% | — | 450k params |
+| **exp24 (α=5e-4)** | 5e-4 | **0.898** | **100%** | 100/0/0 | router collapsed to large |
+| exp25 (α=1e-3) | 1e-3 | 0.907 | 56% | 44/12/44 | dominated by exp26 |
+| **exp26 (α=2e-3, s67)** | 2e-3 | **0.902** | **56%** | 44/15/40 | **knee of the Pareto** |
+| exp27 (α=5e-3) | 5e-3 | 0.911 | 60% | 37/0/63 | nano starved → falls back to small |
+| (historical) Asym warm 12k | 1e-3 | 0.910 | 61% | 46/2/52 | original anchor, full HF stream — superseded by exp26 |
 
-**Best result:** Asym warm 12k — within 0.9 pp of dense large at 61% FLOPs. SNR-adaptive routing: TDLC 46% large, UMA 31% nano. Checkpoint: `model-moe_phase2_asym_nlwarm_s67_12k-3witw8yw:best`
+**Headline:** exp26 at α=2e-3 reaches **0.1 pp of dense large at 56% FLOPs** —
+strict Pareto improvement over the original anchor (0.910/61%). Pareto frontier
+is 2 points (exp24 and exp26); exp25/exp27 are dominated.
+
+**3-seed confirmation (2026-04-26):** ran s32 (exp28) and s42 (exp29) at the
+α=2e-3 recipe. **Bimodal outcome:**
+- s67 (exp26): avg 0.902, routing 44/15/40 — heterogeneous ✓
+- s42 (exp29): avg 0.902, routing 55/12/33 — heterogeneous ✓
+- **s32 (exp28): avg 0.958, routing 0/49/51 — large COLLAPSED** ✗
+
+2 of 3 seeds reproduce the headline; 1 of 3 hits a phase-1-style large-collapse.
+The asym-warm recipe is **not seed-stable**. Honest finding: report
+"2 of 3 seeds achieve 0.902; 1 collapses to a 5pp worse / cheaper attractor."
+
+**Ablations on α=2e-3 (2026-04-26):**
+
+| Run | TDLC BLER | UMA BLER | Avg BLER | TDLC routing | TDLC FLOPs % |
+|---|---:|---:|---:|---|---:|
+| exp26 (3-expert, channel-aware) | 0.867 | 0.937 | **0.902** | 44/15/40 (l/n/s) | 65% |
+| **exp30 (router input = noise)** | **0.965** | 0.972 | **0.968** | **0/11/89** | 41% |
+| **exp31 (drop nano)** | 0.878 | 0.940 | **0.909** | 38/-/62 (l/s) | 65% |
+
+- **Random router → BLER craters 6.6 pp** AND collapses to small (no large
+  ever used). **Channel-aware features are load-bearing** — the central claim
+  of the project. A+ confirmation.
+- **2-expert (no nano) → 0.7 pp worse BLER + 9 pp more FLOPs** (TDLC 65% vs
+  56%). Nano earns its keep — absorbs hopeless low-SNR samples that small
+  would waste compute on. Justifies 3-expert design.
+
+**DeepMIMO OOD eval in flight (2026-04-26):** Stage 1 (asu_campus1 dataset
+generation) submitted as job 19468309. Stage 2 will eval [uma, tdlc,
+asu_campus1] on dense_large + exp26 + exp31 — tests OOD generalization to
+ray-traced channels. Study folder:
+`experiments/2026-04-26-deepmimo-ood-eval-v1/`.
+
+**Sweep regimes** (informative even when not on the frontier):
+- α=5e-4: too weak → router collapses to 100% large (Phase 2 v1 failure).
+- α=[1e-3, 2e-3]: heterogeneous routing emerges, sweet spot at 2e-3.
+- α=5e-3: too strong → router skips nano entirely (BLER cost > FLOPs savings vs small) and falls back to a large/small 2-expert regime — actually *increases* avg FLOPs.
+
+**Alpha sweep eval runs (W&B, 2026-04-25):**
+
+| Exp | α | Train run | Eval run (test set) |
+|---|---:|---|---|
+| exp24 | 5e-4 | _wandb-init flaked, ckpt local-only_ | `002cwsy2` |
+| exp25 | 1e-3 | `3xzxkddv` | `5jswm490` |
+| exp26 | 2e-3 | `t6lkdep2` | `2zboo1rh` |
+| exp27 | 5e-3 | _wandb-init flaked, ckpt local-only_ | `dh4x0qmu` |
+
+Rebaseline finding (exp25 vs original anchor 3witw8yw): at identical α=1e-3,
+50k subset gives noticeably different routing (44/12/44 vs 46/2/52) but similar
+avg BLER. Validates the rebaseline — anchor and exp25 are now compared cleanly.
+
+**Wandb-init flake:** 2 of 4 training runs and 1 of 4 eval runs (recovered on
+re-submit) hit `Failed to read port info after 30.0 seconds`. Not config-side;
+appears intermittent per compute host. Worth a fix or a `WANDB_MODE=offline`
+fallback later.
 
 **20k extension:** val TDLC BLER 0.851 at step 16k, routing stable ~39/22/39. Test eval pending.
-
-**Alpha sweep in flight (2026-04-25):** 4-point Pareto curve `exp24..exp27`
-(α ∈ {5e-4, 1e-3, 2e-3, 5e-3}), bs=128, 12k steps from scratch, asym warm-start,
-seed=67. α=1e-3 (exp25) is an anchor re-baseline on the 50k subset (original
-3witw8yw used full HF stream). Study folder:
-`experiments/2026-04-25-moe-alpha-sweep-v1/`. Submit via `bash submit.sh qsub`.
 
 ## Dense Baselines (20k steps, lr=1e-3, wd=1e-4, seed=67)
 
@@ -95,19 +147,19 @@ Shared stem (285M FLOPs, always paid) + channel-aware router + 3 heterogeneous e
 - **Always include `validation.data_dir` and `training.hf_train_data_dir`** in cluster RUN_ARGS
 - **No `gpu_mem` in qsub**
 
-## A-Grade Roadmap (2026-04-25)
-
-To turn the current B-level result into an A-level report. Bias toward what
-makes the *report* defensible, not what's easy.
+## A-Grade Roadmap (updated 2026-04-26)
 
 | # | Task | Status |
 |---|---|---|
-| 1 | Asym warm 20k test eval | pending |
-| 2 | **Alpha sweep (4 jobs)** — exp24..exp27 in `2026-04-25-moe-alpha-sweep-v1` | submitted? track in study README |
-| 3 | 3-seed run on winning α (s32, s42 alongside s67) | blocked on #2 |
-| 4 | Random-feature router ablation (proves channel-aware claim) | not started |
-| 5 | Doc cleanup: checkpoint_report §4 dataset description, archictures.png typo, routing-column granularity | not started |
-| 6 | (A+ stretch) 2-expert ablation; DeepMIMO OOD eval | not started |
+| 1 | Asym warm 20k test eval | superseded by exp26 alpha-sweep winner |
+| 2 | **Alpha sweep (4 jobs)** — exp24..exp27 | ✅ done; exp26 (α=2e-3) is the winner |
+| 3 | **3-seed on α=2e-3** (s32, s42 alongside s67) | ✅ done; bimodal — 2 reproduce, 1 collapses |
+| 4 | **Random-feature router ablation** | ✅ done; channel-aware features ARE load-bearing (BLER craters 6.6pp without) |
+| 5 | **2-expert ablation** | ✅ done; nano earns its keep (0.7pp BLER hit + 9pp more FLOPs without) |
+| 6 | **DeepMIMO OOD eval** (asu_campus1) | 🟡 Stage 1 generation in flight (job 19468309); Stage 2 eval blocked on Stage 1 |
+| 7 | Doc cleanup: checkpoint_report §4 dataset description, archictures.png typo, mean±std + ablation tables, OOD section | not started |
+| 8 | (Optional A+) Wall-clock latency on CPU/GPU | not started |
+| 9 | (Optional A+) MEAN reimplementation as homogeneous-expert baseline | cut — too time-expensive |
 
 **Cut**: difficulty-guided routing, dataloader Arrow→torch refactor,
 re-baselining dense at bs=512. None move the rubric.
