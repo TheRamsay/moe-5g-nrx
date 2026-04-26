@@ -46,11 +46,48 @@ The asym-warm recipe is **not seed-stable**. Honest finding: report
   56%). Nano earns its keep — absorbs hopeless low-SNR samples that small
   would waste compute on. Justifies 3-expert design.
 
-**DeepMIMO OOD eval in flight (2026-04-26):** Stage 1 (asu_campus1 dataset
-generation) submitted as job 19468309. Stage 2 will eval [uma, tdlc,
-asu_campus1] on dense_large + exp26 + exp31 — tests OOD generalization to
-ray-traced channels. Study folder:
-`experiments/2026-04-26-deepmimo-ood-eval-v1/`.
+**DeepMIMO OOD eval (done 2026-04-26):** Generated `dataset-test-asu_campus1` (32k
+samples, ASU campus 3.5 GHz ray-traced). Eval'd dense_large + exp26 + exp31.
+
+| Model | TDLC | UMA | OOD asu_campus1 | OOD routing | OOD FLOPs % |
+|---|---:|---:|---:|---|---:|
+| Dense large | 0.866 | 0.936 | **0.990** | — | 100% |
+| exp26 (3-expert) | 0.867 | 0.937 | **0.992** | nano 75 / small 14 / large 11 | **32%** |
+| exp31 (2-expert) | 0.878 | 0.940 | **0.993** | small 75 / large 25 | ~71% |
+
+**All three fail on OOD.** Synthetic-trained NRX cannot decode ray-traced channels
+without OOD fine-tune. Honest scope statement. Bonus: 3-expert MoE *uses less compute*
+on OOD (router defaults to nano under unfamiliar features) — separate behavioral observation.
+
+**Stabilization attempts (both negative — characterized failure modes):**
+
+`experiments/2026-04-26-moe-largewarmup-v1/` (exp32/33/34): freeze nano+small for first
+2k steps. Result: **all 3 seeds collapse to 100% large** (Phase 2 v1 failure mode).
+Mean test BLER ~0.86, FLOPs 100%. Over-corrects.
+
+`experiments/2026-04-26-moe-betawarmup-v1/` (exp35/36/37): β=0.5 for first 4k steps,
+drop to 0.1. Result: **3 different routing patterns**, mean test BLER **0.938 ± 0.024**
+— *worse* than no-warmup baseline (0.921 ± 0.032). β-warmup hurts.
+
+> "Two stabilization recipes attempted; neither produced robust seed-stable
+> heterogeneous routing. Asym-warm bimodality appears intrinsic to the asym init choice.
+> Recipe stability is an open problem; recommend best-of-N seeds with multi-seed disclosure."
+
+**Static + SNR-oracle cascade analysis (D, done 2026-04-26):**
+`experiments/2026-04-26-static-baselines-v1/` + `scripts/analyze_static_baselines.py`.
+Pulls per-SNR-bin BLER from W&B and computes hand-rule cascades using true SNR.
+
+| Strategy | Avg BLER | FLOPs % |
+|---|---:|---:|
+| Per-profile static (best fixed rule) | 0.900 | 100% (both → large) |
+| **SNR-oracle cascade tol+0.01..0.02** | **0.900** | **49%** |
+| **exp26 learned MoE** | **0.902** | **56%** |
+| SNR-oracle cascade tol+0.05 | 0.909 | 35% |
+| SNR-oracle cascade tol+0.10 | 0.919 | 27% |
+
+**Honest finding:** with oracle SNR, hand-rule cascade slightly dominates exp26 on FLOPs
+at same BLER (49% vs 56%). exp26 is **on the Pareto frontier** without oracle access.
+Suggests explicit SNR estimate in router input as concrete future work.
 
 **Sweep regimes** (informative even when not on the frontier):
 - α=5e-4: too weak → router collapses to 100% large (Phase 2 v1 failure).
@@ -156,10 +193,14 @@ Shared stem (285M FLOPs, always paid) + channel-aware router + 3 heterogeneous e
 | 3 | **3-seed on α=2e-3** (s32, s42 alongside s67) | ✅ done; bimodal — 2 reproduce, 1 collapses |
 | 4 | **Random-feature router ablation** | ✅ done; channel-aware features ARE load-bearing (BLER craters 6.6pp without) |
 | 5 | **2-expert ablation** | ✅ done; nano earns its keep (0.7pp BLER hit + 9pp more FLOPs without) |
-| 6 | **DeepMIMO OOD eval** (asu_campus1) | 🟡 Stage 1 generation in flight (job 19468309); Stage 2 eval blocked on Stage 1 |
-| 7 | Doc cleanup: checkpoint_report §4 dataset description, archictures.png typo, mean±std + ablation tables, OOD section | not started |
-| 8 | (Optional A+) Wall-clock latency on CPU/GPU | not started |
-| 9 | (Optional A+) MEAN reimplementation as homogeneous-expert baseline | cut — too time-expensive |
+| 6 | **DeepMIMO OOD eval** (asu_campus1) | ✅ done; all 3 models fail (~0.99 BLER); honest scope finding |
+| 7 | **Large-warmup stabilization** (exp32/33/34) | ✅ done; over-corrects to 100% large in 3/3 seeds (negative result) |
+| 8 | **β-warmup stabilization** (exp35/36/37) | ✅ done; mean BLER worse than baseline (negative result) |
+| 9 | **Static + SNR-oracle cascade baseline** (D analysis) | ✅ done; exp26 on Pareto frontier; oracle cascade slightly better at same BLER |
+| 10 | **DeepMIMO few-shot fine-tune** | 📝 drafted (`experiments/2026-04-26-deepmimo-fewshot-finetune-v1/`); not yet fired |
+| 11 | Doc cleanup: checkpoint_report (§4 dataset, mean±std, ablations, OOD section, latency) | not started |
+| 12 | (Optional A+) Wall-clock latency on CPU/GPU | not started |
+| 13 | (Optional A+) MEAN reimplementation as homogeneous-expert baseline | cut — too time-expensive |
 
 **Cut**: difficulty-guided routing, dataloader Arrow→torch refactor,
 re-baselining dense at bs=512. None move the rubric.
