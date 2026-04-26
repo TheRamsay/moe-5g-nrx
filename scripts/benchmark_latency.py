@@ -53,26 +53,22 @@ def _download_artifact(ref: str) -> Path:
     raise FileNotFoundError(f"No .pt file in {art_dir}")
 
 
-def benchmark_model(
+def benchmark_model_synthetic(
     model: torch.nn.Module, device: torch.device, batch_size: int, n_warmup: int = 20, n_iter: int = 100
 ) -> dict:
-    """Time `n_iter` forward passes after `n_warmup`. Returns ms/batch + samples/sec."""
+    """Time `n_iter` forward passes on random Gaussian input."""
     model.eval()
     model.to(device)
 
-    # Build a synthetic batch matching expected input shape per model:
-    # [batch, channels, freq=128, time=14]; channels read from model attribute.
     in_channels = getattr(model, "input_channels", 16)
     x = torch.randn(batch_size, in_channels, 128, 14, device=device)
 
-    # Warmup
     with torch.inference_mode():
         for _ in range(n_warmup):
             _ = model(x)
     if device.type == "cuda":
         torch.cuda.synchronize()
 
-    # Time
     t0 = time.perf_counter()
     with torch.inference_mode():
         for _ in range(n_iter):
@@ -81,13 +77,55 @@ def benchmark_model(
         torch.cuda.synchronize()
     elapsed = time.perf_counter() - t0
 
-    ms_per_batch = (elapsed / n_iter) * 1000
-    samples_per_s = batch_size * n_iter / elapsed
     return {
-        "ms_per_batch": ms_per_batch,
-        "samples_per_s": samples_per_s,
+        "ms_per_batch": (elapsed / n_iter) * 1000,
+        "samples_per_s": batch_size * n_iter / elapsed,
         "batch_size": batch_size,
         "n_iter": n_iter,
+        "data": "synthetic_gaussian",
+    }
+
+
+def benchmark_model_real(
+    model: torch.nn.Module,
+    device: torch.device,
+    data_path: Path,
+    batch_size: int,
+    n_warmup: int = 20,
+    n_iter: int = 200,
+) -> dict:
+    """Time `n_iter` forward passes on real test data (cycles through batches)."""
+    from src.data import build_cached_dataloader
+
+    model.eval()
+    model.to(device)
+    loader = build_cached_dataloader(path=data_path, batch_size=batch_size, num_workers=0)
+    batches = []
+    for batch in loader:
+        batches.append(batch.inputs.to(device, non_blocking=True))
+        if len(batches) >= 8:  # cache 8 batches; cycle for n_iter
+            break
+
+    with torch.inference_mode():
+        for i in range(n_warmup):
+            _ = model(batches[i % len(batches)])
+    if device.type == "cuda":
+        torch.cuda.synchronize()
+
+    t0 = time.perf_counter()
+    with torch.inference_mode():
+        for i in range(n_iter):
+            _ = model(batches[i % len(batches)])
+    if device.type == "cuda":
+        torch.cuda.synchronize()
+    elapsed = time.perf_counter() - t0
+
+    return {
+        "ms_per_batch": (elapsed / n_iter) * 1000,
+        "samples_per_s": batch_size * n_iter / elapsed,
+        "batch_size": batch_size,
+        "n_iter": n_iter,
+        "data": str(data_path),
     }
 
 
@@ -95,8 +133,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--device", default="cuda", choices=["cpu", "cuda"])
     parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--n-iter", type=int, default=100)
+    parser.add_argument("--n-iter", type=int, default=200)
     parser.add_argument("--n-warmup", type=int, default=20)
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=None,
+        help="If set, also benchmark on real test data from data_dir/{uma,tdlc}.pt",
+    )
     parser.add_argument("--out", type=Path, default=Path("latency_results.json"))
     args = parser.parse_args()
 
@@ -106,38 +150,57 @@ def main() -> int:
         device = torch.device("cpu")
 
     results = {"device": str(device), "batch_size": args.batch_size, "models": {}}
+    real_profiles = []
+    if args.data_dir is not None:
+        for prof in ("uma", "tdlc"):
+            if (args.data_dir / f"{prof}.pt").exists():
+                real_profiles.append(prof)
+
     for label, ref in CHECKPOINTS:
         print(f"[INFO] {label} ({ref})", file=sys.stderr)
         ckpt_path = _download_artifact(ref)
-        model, config = load_checkpoint(ckpt_path, device)
+        model, _config = load_checkpoint(ckpt_path, device)
         n_params = sum(p.numel() for p in model.parameters())
 
-        bench = benchmark_model(model, device, args.batch_size, args.n_warmup, args.n_iter)
+        synth = benchmark_model_synthetic(model, device, args.batch_size, args.n_warmup, args.n_iter)
+        per_profile = {}
+        for prof in real_profiles:
+            real = benchmark_model_real(
+                model, device, args.data_dir / f"{prof}.pt", args.batch_size, args.n_warmup, args.n_iter
+            )
+            per_profile[prof] = real
+
         results["models"][label] = {
             "checkpoint": ref,
             "num_parameters": n_params,
-            **bench,
+            "synthetic": synth,
+            "real": per_profile,
         }
-        print(
-            f"  {label}: {bench['ms_per_batch']:.2f} ms/batch | "
-            f"{bench['samples_per_s']:.1f} samples/sec | {n_params / 1e3:.0f}k params",
-            file=sys.stderr,
+        line = (
+            f"  {label}: synth {synth['ms_per_batch']:.2f}ms"
+            + "".join(f" | {p} {per_profile[p]['ms_per_batch']:.2f}ms" for p in real_profiles)
+            + f" | {n_params / 1e3:.0f}k params"
         )
+        print(line, file=sys.stderr)
 
     args.out.write_text(json.dumps(results, indent=2))
     print(f"[INFO] wrote {args.out}", file=sys.stderr)
 
-    # Print a markdown table to stdout
+    # Markdown table
     print(f"\n## Wall-clock latency on `{device}` (batch_size={args.batch_size}, n_iter={args.n_iter})\n")
-    print("| Model | Params | ms/batch | samples/sec | Speedup vs dense_large |")
-    print("|---|---:|---:|---:|---:|")
-    base = results["models"].get("dense_large", {}).get("ms_per_batch", float("nan"))
+    headers = ["Model", "Params"] + [f"{src} ms/batch" for src in (["synth"] + real_profiles)]
+    headers += ["Speedup vs dense_large (synth)"]
+    print("| " + " | ".join(headers) + " |")
+    print("|---|---:|" + "---:|" * (len(headers) - 2) + "---:|")
+    base = results["models"].get("dense_large", {}).get("synthetic", {}).get("ms_per_batch", float("nan"))
     for label, m in results["models"].items():
-        speedup = base / m["ms_per_batch"] if base and m["ms_per_batch"] else float("nan")
-        print(
-            f"| {label} | {m['num_parameters'] / 1e3:.0f}k | "
-            f"{m['ms_per_batch']:.2f} | {m['samples_per_s']:.1f} | {speedup:.2f}× |"
-        )
+        synth_ms = m["synthetic"]["ms_per_batch"]
+        row = [label, f"{m['num_parameters'] / 1e3:.0f}k", f"{synth_ms:.2f}"]
+        for prof in real_profiles:
+            row.append(f"{m['real'][prof]['ms_per_batch']:.2f}")
+        speedup = base / synth_ms if base and synth_ms else float("nan")
+        row.append(f"{speedup:.2f}×")
+        print("| " + " | ".join(row) + " |")
     return 0
 
 
