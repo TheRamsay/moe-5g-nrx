@@ -12,7 +12,7 @@ DATASET_FOLDER="${DATASET_FOLDER:-./data/deepmimov3/}"
 SPLIT="${SPLIT:-test}"
 NUM_SAMPLES="${NUM_SAMPLES:-32768}"
 RUNTIME_DEVICE="${RUNTIME_DEVICE:-cpu}"
-WALLTIME="${WALLTIME:-00:40:00}"
+WALLTIME="${WALLTIME:-02:00:00}"  # rsync of repo to scratch can be slow on /storage; bumped from 00:40:00 after walltime kills
 SELECT_RESOURCES="${SELECT_RESOURCES:-}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
 
