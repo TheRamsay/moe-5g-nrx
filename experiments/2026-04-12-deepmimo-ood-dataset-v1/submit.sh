@@ -48,7 +48,6 @@ build_run_args() {
 echo "Study: deepmimo-ood-dataset-v1"
 echo "Mode: $MODE"
 echo "Scenario: $SCENARIO"
-echo "Profile: $PROFILE_NAME"
 echo "Output dir: $OUTPUT_DIR"
 echo "DeepMIMO dataset folder: $DATASET_FOLDER"
 echo "Split: $SPLIT"
