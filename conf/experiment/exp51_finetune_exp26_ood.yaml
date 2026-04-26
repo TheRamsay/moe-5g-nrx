@@ -1,0 +1,39 @@
+# @package _global_
+# Few-shot OOD fine-tune: exp26 (3-expert MoE α=2e-3) on asu_campus1.
+# Resume exp26 best checkpoint, fine-tune for 500 steps on 2k DeepMIMO samples
+# at lr=1e-4. Keep FLOPs penalty α=2e-3 so router can re-learn cheap routing on OOD.
+
+defaults:
+  - override /model: moe_nl
+  - override /dataset: mixed
+
+experiment:
+  batch_name: deepmimo-fewshot-finetune-v1
+  exp_name: ft_exp26_ood_asu_2k_500step
+  tags: [finetune, ood, deepmimo, moe, asym-warm, simo-1x4, 16qam]
+  notes: Fine-tune exp26 (3-expert α=2e-3) on asu_campus1 (N=2048, 500 steps, lr=1e-4).
+  study_slug: 2026-04-26-deepmimo-fewshot-finetune-v1
+  study_path: experiments/2026-04-26-deepmimo-fewshot-finetune-v1
+  question: Does brief fine-tune on a small DeepMIMO slice recover OOD performance?
+
+dataset:
+  channel_profile: asu_campus1
+
+model:
+  compute:
+    flops_penalty_alpha: 2e-3
+    load_balance_beta: 0.1
+
+training:
+  hf_dataset: Vack0/moe-5g-nrx
+  resume_from: knn_moe-5g-nrx/moe-5g-nrx/model-moe_alphasweep_asym_a2e3_s67-t6lkdep2:best
+  batch_size: 128
+  learning_rate: 1.0e-4
+  weight_decay: 1.0e-4
+  max_steps: 500
+  hf_max_samples: 2048
+
+validation:
+  profiles: [uma, tdlc]
+  every_n_steps: 100
+  snr_bins: 5

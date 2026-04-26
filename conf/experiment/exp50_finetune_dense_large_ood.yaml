@@ -1,0 +1,34 @@
+# @package _global_
+# Few-shot OOD fine-tune: dense_large on asu_campus1.
+# Resume dense_large checkpoint, fine-tune for 500 steps on 2k DeepMIMO samples
+# at lr=1e-4 (10× below base).
+
+defaults:
+  - override /model: static_dense
+  - override /dataset: mixed
+
+experiment:
+  batch_name: deepmimo-fewshot-finetune-v1
+  exp_name: ft_dense_large_ood_asu_2k_500step
+  tags: [finetune, ood, deepmimo, dense, simo-1x4, 16qam]
+  notes: Fine-tune dense_large on asu_campus1 (N=2048, 500 steps, lr=1e-4).
+  study_slug: 2026-04-26-deepmimo-fewshot-finetune-v1
+  study_path: experiments/2026-04-26-deepmimo-fewshot-finetune-v1
+  question: Does brief fine-tune on a small DeepMIMO slice recover OOD performance?
+
+dataset:
+  channel_profile: asu_campus1
+
+training:
+  hf_dataset: Vack0/moe-5g-nrx
+  resume_from: knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best
+  batch_size: 128
+  learning_rate: 1.0e-4
+  weight_decay: 1.0e-4
+  max_steps: 500
+  hf_max_samples: 2048
+
+validation:
+  profiles: [uma, tdlc]
+  every_n_steps: 100
+  snr_bins: 5
