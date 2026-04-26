@@ -1,0 +1,20 @@
+# @package _global_
+# Stage 3: eval the OOD fine-tuned exp26 (3-expert MoE) on [uma, tdlc, asu_campus1].
+
+defaults:
+  - override /model: moe_nl
+  - override /dataset: mixed
+
+experiment:
+  batch_name: deepmimo-fewshot-finetune-v1
+  exp_name: eval_ft_exp26_ood
+  tags: [eval, ood, deepmimo, moe, finetune, asym-warm, simo-1x4, 16qam]
+  notes: Eval OOD-fine-tuned exp26 (3-expert α=2e-3) checkpoint on uma + tdlc + asu_campus1.
+  study_slug: 2026-04-26-deepmimo-fewshot-finetune-v1
+  study_path: experiments/2026-04-26-deepmimo-fewshot-finetune-v1
+  question: Does brief fine-tune on a small DeepMIMO slice recover OOD performance?
+
+evaluation:
+  profiles: [uma, tdlc, asu_campus1]
+  snr_bins: 7
+  use_artifacts: true

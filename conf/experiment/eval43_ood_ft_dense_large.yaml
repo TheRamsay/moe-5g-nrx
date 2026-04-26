@@ -1,0 +1,27 @@
+# @package _global_
+# Stage 3: eval the OOD fine-tuned dense_large on [uma, tdlc, asu_campus1].
+
+defaults:
+  - override /model: static_dense
+  - override /dataset: mixed
+
+experiment:
+  batch_name: deepmimo-fewshot-finetune-v1
+  exp_name: eval_ft_dense_large_ood
+  tags: [eval, ood, deepmimo, dense, finetune, simo-1x4, 16qam]
+  notes: Eval OOD-fine-tuned dense_large checkpoint on uma + tdlc + asu_campus1.
+  study_slug: 2026-04-26-deepmimo-fewshot-finetune-v1
+  study_path: experiments/2026-04-26-deepmimo-fewshot-finetune-v1
+  question: Does brief fine-tune on a small DeepMIMO slice recover OOD performance?
+
+# Match arch of dense_large checkpoint (block_hidden_dim=64)
+model:
+  backbone:
+    stem_hidden_dims: [64, 64]
+    block_hidden_dim: 64
+    readout_hidden_dim: 128
+
+evaluation:
+  profiles: [uma, tdlc, asu_campus1]
+  snr_bins: 7
+  use_artifacts: true
