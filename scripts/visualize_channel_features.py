@@ -19,10 +19,15 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from sklearn.manifold import TSNE
 
-from src.data import build_cached_dataloader
-from src.models import build_model_from_config
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from sklearn.manifold import TSNE  # noqa: E402
+
+from src.data import build_cached_dataloader  # noqa: E402
+from src.models import build_model_from_config  # noqa: E402
 
 EXPERT_COLORS = {0: "#4daf4a", 1: "#377eb8", 2: "#e41a1c"}  # nano / small / large
 EXPERT_NAMES = {0: "nano", 1: "small", 2: "large"}

@@ -19,6 +19,7 @@ dependencies = [
     "wandb[workspaces]>=0.25.1",
     "weave>=0.52.35",
     "deepmimov3>=0.2.9",
+    "scikit-learn>=1.4.0",
 ]
 
 [dependency-groups]

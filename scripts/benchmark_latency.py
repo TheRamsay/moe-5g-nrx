@@ -17,7 +17,11 @@ from pathlib import Path
 
 import torch
 
-from src.models import build_model_from_config
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.models import build_model_from_config  # noqa: E402
 
 
 def load_checkpoint(ckpt_path: Path, device: torch.device) -> tuple[torch.nn.Module, dict]:
