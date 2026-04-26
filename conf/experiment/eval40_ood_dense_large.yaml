@@ -1,0 +1,22 @@
+# @package _global_
+# Eval-only preset for OOD generalization test on dense_large.
+# Dataset profiles: in-distribution (uma, tdlc) + OOD (asu_campus1 ray-traced).
+# The OOD dataset is auto-resolved via W&B artifact `dataset-test-asu_campus1:latest`.
+
+defaults:
+  - override /model: static_dense
+  - override /dataset: mixed
+
+experiment:
+  batch_name: deepmimo-ood-eval-v1
+  exp_name: eval_ood_dense_large
+  tags: [eval, ood, deepmimo, dense, simo-1x4, 16qam]
+  notes: OOD eval for dense_large on asu_campus1 + uma + tdlc.
+  study_slug: 2026-04-26-deepmimo-ood-eval-v1
+  study_path: experiments/2026-04-26-deepmimo-ood-eval-v1
+  question: Does the dense_large baseline generalize to ray-traced channels?
+
+evaluation:
+  profiles: [uma, tdlc, asu_campus1]
+  snr_bins: 7
+  use_artifacts: true

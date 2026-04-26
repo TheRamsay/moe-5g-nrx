@@ -1,0 +1,20 @@
+# @package _global_
+# Eval-only preset for OOD test on exp31 (2-expert ablation).
+
+defaults:
+  - override /model: moe_nl
+  - override /dataset: mixed
+
+experiment:
+  batch_name: deepmimo-ood-eval-v1
+  exp_name: eval_ood_exp31_2expert
+  tags: [eval, ood, deepmimo, moe, two-expert, simo-1x4, 16qam]
+  notes: OOD eval for exp31 (small+large 2-expert) on asu_campus1 + uma + tdlc.
+  study_slug: 2026-04-26-deepmimo-ood-eval-v1
+  study_path: experiments/2026-04-26-deepmimo-ood-eval-v1
+  question: Does the 2-expert MoE generalize to ray-traced channels?
+
+evaluation:
+  profiles: [uma, tdlc, asu_campus1]
+  snr_bins: 7
+  use_artifacts: true

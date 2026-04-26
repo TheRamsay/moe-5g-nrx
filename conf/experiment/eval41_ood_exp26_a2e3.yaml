@@ -1,0 +1,20 @@
+# @package _global_
+# Eval-only preset for OOD test on exp26 (α=2e-3 MoE winner).
+
+defaults:
+  - override /model: moe_nl
+  - override /dataset: mixed
+
+experiment:
+  batch_name: deepmimo-ood-eval-v1
+  exp_name: eval_ood_exp26_a2e3
+  tags: [eval, ood, deepmimo, moe, asym-warm, simo-1x4, 16qam]
+  notes: OOD eval for exp26 (3-expert, α=2e-3 winner) on asu_campus1 + uma + tdlc.
+  study_slug: 2026-04-26-deepmimo-ood-eval-v1
+  study_path: experiments/2026-04-26-deepmimo-ood-eval-v1
+  question: Does the compute-aware MoE generalize to ray-traced channels?
+
+evaluation:
+  profiles: [uma, tdlc, asu_campus1]
+  snr_bins: 7
+  use_artifacts: true

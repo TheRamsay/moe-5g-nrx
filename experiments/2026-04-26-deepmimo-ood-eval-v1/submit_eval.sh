@@ -21,11 +21,13 @@ SELECT_RESOURCES="${SELECT_RESOURCES:-select=1:ncpus=4:ngpus=1:mem=16gb:scratch_
 # Profiles: uma+tdlc resolve via local data_dir/.pt; SCENARIO resolves via W&B
 # artifact `dataset-test-${SCENARIO}:latest` (auto-downloaded by evaluate.py).
 
-# (label, experiment_preset, checkpoint_artifact_or_local_path)
+# (label, eval-preset, checkpoint_artifact)
+# eval-preset YAMLs bake in profiles=[uma,tdlc,asu_campus1] (avoids the
+# qsub-RUN_ARGS bracket-eats-comma trap).
 RUNS=(
-  "dense_large|exp10_dense_large_final20k|knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best"
-  "exp26_a2e3|exp26_moe_alphasweep_a2e3|knn_moe-5g-nrx/moe-5g-nrx/model-moe_alphasweep_asym_a2e3_s67-t6lkdep2:best"
-  "exp31_2expert|exp31_moe_2expert_a2e3|knn_moe-5g-nrx/moe-5g-nrx/model-moe_ablation_2expert_a2e3_s67-5c0kshem:best"
+  "dense_large|eval40_ood_dense_large|knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best"
+  "exp26_a2e3|eval41_ood_exp26_a2e3|knn_moe-5g-nrx/moe-5g-nrx/model-moe_alphasweep_asym_a2e3_s67-t6lkdep2:best"
+  "exp31_2expert|eval42_ood_exp31_2expert|knn_moe-5g-nrx/moe-5g-nrx/model-moe_ablation_2expert_a2e3_s67-5c0kshem:best"
 )
 
 cd "$REPO_ROOT"
