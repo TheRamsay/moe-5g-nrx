@@ -24,10 +24,16 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from sklearn.manifold import TSNE  # noqa: E402
-
 from src.data import build_cached_dataloader  # noqa: E402
 from src.models import build_model_from_config  # noqa: E402
+
+
+def pca_2d(features: np.ndarray) -> np.ndarray:
+    """Numpy SVD-based 2-D PCA. Faster + zero deps vs scikit-learn TSNE."""
+    centered = features - features.mean(axis=0, keepdims=True)
+    _u, _s, vt = np.linalg.svd(centered, full_matrices=False)
+    return centered @ vt[:2].T
+
 
 EXPERT_COLORS = {0: "#4daf4a", 1: "#377eb8", 2: "#e41a1c"}  # nano / small / large
 EXPERT_NAMES = {0: "nano", 1: "small", 2: "large"}
@@ -79,8 +85,8 @@ def collect_features(
 
 
 def plot_tsne(features: np.ndarray, experts: np.ndarray, snrs: np.ndarray, profile: str, out_path: Path) -> None:
-    print(f"[INFO] {profile}: t-SNE on {len(features)} samples, dim={features.shape[1]}", file=sys.stderr)
-    embed = TSNE(n_components=2, perplexity=30, init="pca", random_state=0).fit_transform(features)
+    print(f"[INFO] {profile}: PCA-2D on {len(features)} samples, dim={features.shape[1]}", file=sys.stderr)
+    embed = pca_2d(features)
 
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
     # Left: colored by chosen expert
