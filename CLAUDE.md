@@ -89,6 +89,31 @@ Pulls per-SNR-bin BLER from W&B and computes hand-rule cascades using true SNR.
 at same BLER (49% vs 56%). exp26 is **on the Pareto frontier** without oracle access.
 Suggests explicit SNR estimate in router input as concrete future work.
 
+**Wall-clock latency (synthetic Gaussian, GPU, batch=64, 2026-04-26):**
+
+| Model | Params | ms/batch | samples/sec | Speedup vs dense_large |
+|---|---:|---:|---:|---:|
+| dense_nano | 90k | 0.97 | 65,693 | 3.00× |
+| dense_small | 168k | 1.71 | 37,382 | 1.70× |
+| dense_large | 450k | 2.92 | 21,925 | 1.00× |
+| **exp26 MoE** | 583k | **1.51** | **42,391** | **1.93×** |
+
+The 44% FLOPs reduction translates to **1.93× actual GPU speedup**, better than
+theoretical 1.78× because at hard top-1 only the selected expert runs and
+kernel-launch overhead favors the smaller experts. Caveat: synthetic input →
+router argmax approximately uniform 33/33/33. Real-data per-profile timing in flight.
+
+**DeepMIMO few-shot OOD fine-tune (in flight, 2026-04-26 evening):**
+Stages 1+2 done — gen `dataset-train-asu_campus1` (2048 samples, `y1o9guf5`),
+fine-tune dense_large (500 steps, lr=1e-4, `go74dlm7`) + exp26 (`9t2wyyus`).
+Stage 3 OOD evals queued (`:best` alias not saved by short fine-tune; using
+`:latest`). Will report few-shot recovery vs zero-shot 0.99 BLER.
+
+**Channel-feature PCA-2D viz (done 2026-04-26):** stem features colored by
+router's selected expert + by true SNR. Figures at
+`/storage/brno2/home/ramsay/moe-5g-nrx/docs/figures/channel_feature_tsne_{uma,tdlc}.png`
+(numpy SVD-PCA; scikit-learn dropped because cluster uv cache offline).
+
 **Sweep regimes** (informative even when not on the frontier):
 - α=5e-4: too weak → router collapses to 100% large (Phase 2 v1 failure).
 - α=[1e-3, 2e-3]: heterogeneous routing emerges, sweet spot at 2e-3.
@@ -197,12 +222,14 @@ Shared stem (285M FLOPs, always paid) + channel-aware router + 3 heterogeneous e
 | 7 | **Large-warmup stabilization** (exp32/33/34) | ✅ done; over-corrects to 100% large in 3/3 seeds (negative result) |
 | 8 | **β-warmup stabilization** (exp35/36/37) | ✅ done; mean BLER worse than baseline (negative result) |
 | 9 | **Static + SNR-oracle cascade baseline** (D analysis) | ✅ done; exp26 on Pareto frontier; oracle cascade slightly better at same BLER |
-| 10 | **DeepMIMO few-shot fine-tune** (Stage 1+2 done; Stage 3 OOD eval pending) | 🟡 dense_large fine-tune ✅ done (`go74dlm7`); exp26 fine-tune queued; OOD eval after |
-| 11 | **Wall-clock latency benchmark** | 🟡 queued (job 19473464) |
-| 12 | **Per-SNR routing visualization** | ✅ done (`docs/figures/per_snr_routing_2zboo1rh.png` after commit) |
-| 13 | **Channel-feature visualization** (PCA-2D, dropped sklearn) | 🟡 running (job 19473435) |
-| 14 | Doc cleanup: checkpoint_report (§4 dataset, mean±std, ablations, OOD section, latency) | not started |
-| 15 | (Optional A+) MEAN reimplementation as homogeneous-expert baseline | cut — too time-expensive |
+| 10 | **DeepMIMO few-shot fine-tune** | Stages 1+2 ✅ done (`go74dlm7` dense, `9t2wyyus` exp26); Stage 3 OOD eval ⏳ queued (19474672/19474935 with `:latest`) |
+| 11 | **Wall-clock latency benchmark (synthetic)** | ✅ done — exp26 1.93× faster than dense_large on GPU |
+| 11b | Wall-clock latency on real test data (per-profile) | ⏳ queued (19474673, 90 min walltime to survive PTX JIT) |
+| 12 | **Per-SNR routing visualization** | ✅ done (`docs/figures/per_snr_routing_2zboo1rh.png`, exp26) |
+| 13 | **Channel-feature PCA-2D visualization** | ✅ done (`docs/figures/channel_feature_tsne_{uma,tdlc}.png`) |
+| 14 | Multi-scenario OOD (e.g. I1_2p4 indoor) | ⏸ blocked — deepmimo.net download link broken; will skip if not back soon |
+| 15 | Doc cleanup: checkpoint_report (§4 dataset, mean±std, ablations, OOD section, latency, viz figures) | not started |
+| 16 | (Optional A+) MEAN reimplementation as homogeneous-expert baseline | cut — too time-expensive |
 
 **Cut**: difficulty-guided routing, dataloader Arrow→torch refactor,
 re-baselining dense at bs=512. None move the rubric.
