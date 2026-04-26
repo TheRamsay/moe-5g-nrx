@@ -31,41 +31,50 @@ EXPERT_FLOPS = {
 }
 DENSE_LARGE_FLOPS = EXPERT_FLOPS["large"]
 
-# Source eval runs (W&B run IDs). Update if newer evals supersede these.
+# Source eval runs (W&B run IDs). Use 2026-04-26 reevals which have per-SNR
+# table artifacts (the older 2026-04 evals only have overall scalars).
 DEFAULT_RUNS = {
-    # dense baselines (test eval against uma + tdlc)
-    "dense_nano": "f4qeu7o3",
-    "dense_small": "u1bolt4j",
-    "dense_large": "87ki5ylk",
-    # MoE winner (test eval against uma + tdlc)
+    "dense_nano": "bx7hylp6",
+    "dense_small": "8haq7zuz",
+    "dense_large": "4f7c0cun",
     "exp26_a2e3": "2zboo1rh",
 }
 
 PROFILES = ("uma", "tdlc")
 
 
-def _fetch_run_summary(api: wandb.Api, entity: str, project: str, run_id: str) -> dict[str, Any]:
-    run = api.run(f"{entity}/{project}/{run_id}")
-    return dict(run.summary)
+def _fetch_run(api: wandb.Api, entity: str, project: str, run_id: str):
+    return api.run(f"{entity}/{project}/{run_id}")
 
 
-def _extract_per_snr_bler(summary: dict[str, Any], profile: str, num_bins: int = 7) -> list[tuple[float, float]]:
-    """Return list of (snr_center, bler) tuples for the eval profile."""
+def _extract_per_snr_bler_from_table(run, profile: str) -> list[tuple[float, float]]:
+    """Read per-SNR-bin BLER from the run's eval/snr_binned table artifact.
+
+    Table columns: profile, bin_index, snr_min, snr_max, snr_center, ber, bler, num_samples.
+    """
     out: list[tuple[float, float]] = []
-    for i in range(num_bins):
-        bler_key = f"eval/{profile}/snr_bin_{i}/bler"
-        snr_key = f"eval/{profile}/snr_bin_{i}/snr_center"
-        if bler_key not in summary or snr_key not in summary:
-            break
-        out.append((float(summary[snr_key]), float(summary[bler_key])))
-    if not out:
-        # fall back to val keys (some runs only have val)
-        for i in range(num_bins):
-            bler_key = f"val/{profile}/snr_bin_{i}/bler"
-            snr_key = f"val/{profile}/snr_bin_{i}/snr_center"
-            if bler_key not in summary or snr_key not in summary:
-                break
-            out.append((float(summary[snr_key]), float(summary[bler_key])))
+    for art in run.logged_artifacts():
+        if "snr_binned" not in art.name:
+            continue
+        art_dir = art.download(root=f"/tmp/wandb_static_baselines/{run.id}/{art.name.replace(':', '_')}")
+        # The table file lives somewhere in art_dir
+        for table_path in Path(art_dir).rglob("*.table.json"):
+            data = json.loads(Path(table_path).read_text())
+            cols = data.get("columns", [])
+            rows = data.get("data", [])
+            if not cols or "profile" not in cols:
+                continue
+            try:
+                p_idx = cols.index("profile")
+                snr_idx = cols.index("snr_center")
+                bler_idx = cols.index("bler")
+            except ValueError:
+                continue
+            for row in rows:
+                if str(row[p_idx]).lower() == profile.lower():
+                    out.append((float(row[snr_idx]), float(row[bler_idx])))
+            if out:
+                return sorted(out, key=lambda x: x[0])
     return out
 
 
@@ -168,15 +177,17 @@ def main() -> int:
 
     api = wandb.Api()
 
-    print("[INFO] Fetching W&B run summaries...", file=sys.stderr)
+    print("[INFO] Fetching W&B runs...", file=sys.stderr)
+    runs = {}
     summaries = {}
     for label, run_id in DEFAULT_RUNS.items():
         print(f"  - {label} ({run_id})", file=sys.stderr)
-        summaries[label] = _fetch_run_summary(api, args.entity, args.project, run_id)
+        runs[label] = _fetch_run(api, args.entity, args.project, run_id)
+        summaries[label] = dict(runs[label].summary)
 
-    # Extract per-SNR BLER for dense experts
+    # Extract per-SNR BLER for dense experts (from table artifacts)
     dense_per_snr = {
-        name: {profile: _extract_per_snr_bler(summaries[f"dense_{name}"], profile) for profile in PROFILES}
+        name: {profile: _extract_per_snr_bler_from_table(runs[f"dense_{name}"], profile) for profile in PROFILES}
         for name in ("nano", "small", "large")
     }
 
