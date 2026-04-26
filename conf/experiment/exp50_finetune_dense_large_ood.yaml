@@ -19,6 +19,13 @@ experiment:
 dataset:
   channel_profile: asu_campus1
 
+# Match dense_large architecture (exp05); default static_dense uses block_hidden_dim=48
+model:
+  backbone:
+    stem_hidden_dims: [64, 64]
+    block_hidden_dim: 64
+    readout_hidden_dim: 128
+
 training:
   hf_dataset: Vack0/moe-5g-nrx
   resume_from: knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best
