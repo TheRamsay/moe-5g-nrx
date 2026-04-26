@@ -451,17 +451,43 @@ class Trainer:
         )
 
     def _apply_freeze_config(self) -> None:
-        """Freeze all expert parameters if training.freeze_experts=true (Stage 2B)."""
-        if not bool(self.cfg.training.get("freeze_experts", False)):
+        """Freeze expert parameters at training start.
+
+        Two modes:
+        - `training.freeze_experts: true` freezes ALL experts (Stage 2B legacy).
+        - `training.freeze_experts_list: [nano, small]` freezes a NAMED subset.
+          Used by the asym-warm stabilization recipe: freeze warm-started
+          nano + small for the first N steps so random-init large can train
+          up without competition, then unfreeze at `unfreeze_experts_at_step`.
+        """
+        freeze_list = list(self.cfg.training.get("freeze_experts_list", []) or [])
+        freeze_all = bool(self.cfg.training.get("freeze_experts", False))
+        if not freeze_list and not freeze_all:
             return
         if not hasattr(self.model, "experts"):
-            print("[WARNING] freeze_experts=true but model has no .experts attribute — ignoring")
+            print("[WARNING] freeze_experts requested but model has no .experts attribute — ignoring")
             return
-        for param in self.model.experts.parameters():
-            param.requires_grad_(False)
-        frozen = sum(p.numel() for p in self.model.experts.parameters())
-        total = sum(p.numel() for p in self.model.parameters())
-        print(f"[INFO] Frozen {frozen:,} expert params ({100 * frozen / max(total, 1):.1f}% of {total:,} total)")
+        if freeze_list:
+            available = list(self.model.experts.keys())
+            for name in freeze_list:
+                if name not in self.model.experts:
+                    raise ValueError(f"freeze_experts_list contains unknown expert '{name}'; available: {available}")
+                for p in self.model.experts[name].parameters():
+                    p.requires_grad_(False)
+            frozen = sum(p.numel() for name in freeze_list for p in self.model.experts[name].parameters())
+            total = sum(p.numel() for p in self.model.parameters())
+            print(
+                f"[INFO] Frozen experts {freeze_list}: {frozen:,} params "
+                f"({100 * frozen / max(total, 1):.1f}% of {total:,} total)"
+            )
+        else:
+            for param in self.model.experts.parameters():
+                param.requires_grad_(False)
+            frozen = sum(p.numel() for p in self.model.experts.parameters())
+            total = sum(p.numel() for p in self.model.parameters())
+            print(
+                f"[INFO] Frozen ALL experts: {frozen:,} params ({100 * frozen / max(total, 1):.1f}% of {total:,} total)"
+            )
 
     def _unfreeze_experts(self) -> None:
         """Unfreeze expert parameters and add them to the optimizer (Stage 2C transition)."""

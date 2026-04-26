@@ -1,0 +1,57 @@
+# @package _global_
+# Experiment 32: Large-warmup stabilization recipe — seed=67
+#
+# Tests whether the s32-style collapse can be prevented by giving large a
+# 2k-step head start. nano + small are warm-started but FROZEN for the first
+# 2k steps; only stem + large + router train. After step 2000, nano/small
+# unfreeze and joint training proceeds for 10k more steps.
+#
+# Hypothesis: by step 2000 large has caught up to nano/small in BLER, so the
+# router never enters the "always avoid large because it's worse" regime that
+# caused the s32 seed (and original Phase 1) to collapse.
+#
+# Compares against exp26 (no warmup, bimodal across seeds). If 3 seeds reach
+# the heterogeneous-routing attractor, the recipe is stabilized.
+
+defaults:
+  - override /model: moe_nl
+  - override /dataset: mixed
+
+experiment:
+  batch_name: moe-largewarmup-v1
+  exp_name: moe_largewarmup_a2e3_s67
+  tags: [moe, asym-warm, large-warmup, stabilization, hf, simo-1x4, 16qam, nl-range]
+  notes: >
+    Stabilization recipe: freeze nano + small for first 2k steps so random-init
+    large can train up; then unfreeze for joint training. Identical to exp26
+    except for the freeze-list + unfreeze step.
+  study_slug: 2026-04-26-moe-largewarmup-v1
+  study_path: experiments/2026-04-26-moe-largewarmup-v1
+  question: Does freezing nano+small for 2k steps stabilize the asym-warm recipe across seeds?
+
+runtime:
+  seed: 67
+
+model:
+  compute:
+    flops_penalty_alpha: 2e-3
+    load_balance_beta: 0.1
+
+training:
+  hf_dataset: Vack0/moe-5g-nrx
+  batch_size: 128
+  learning_rate: 1e-3
+  weight_decay: 1e-4
+  max_steps: 12000
+  freeze_experts_list: [nano, small]
+  unfreeze_experts_at_step: 2000
+  warm_start:
+    stem_checkpoint: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best"
+    experts:
+      nano: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_nano_final20k_constant_lr_s67-aos4hhid:best"
+      small: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_small_final20k_constant_lr_s67-kivdz4qu:best"
+      # large: omitted — random init (asym warm)
+
+validation:
+  every_n_steps: 500
+  snr_bins: 5
