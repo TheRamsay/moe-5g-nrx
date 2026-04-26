@@ -644,6 +644,14 @@ class Trainer:
             final_loss = final_loss + flops_penalty_alpha * outputs["expected_flops_ratio"]
 
         load_balance_beta = float(compute_cfg.get("load_balance_beta", 0.0))
+        # Optional β warmup: hold at `load_balance_beta_warmup_value` (typically
+        # higher than the steady-state β) for the first `load_balance_beta_warmup_steps`
+        # to force routing diversity during the vulnerable random-init window,
+        # then drop to the steady-state β.
+        beta_warmup_steps = int(compute_cfg.get("load_balance_beta_warmup_steps", 0))
+        beta_warmup_value = compute_cfg.get("load_balance_beta_warmup_value")
+        if beta_warmup_steps > 0 and beta_warmup_value is not None and self.global_step < beta_warmup_steps:
+            load_balance_beta = float(beta_warmup_value)
         if load_balance_beta > 0.0 and "router_probs" in outputs:
             mean_probs = outputs["router_probs"].mean(dim=0)
             uniform_probs = torch.full_like(mean_probs, 1.0 / max(mean_probs.numel(), 1))

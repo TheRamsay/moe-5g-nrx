@@ -1,0 +1,42 @@
+# @package _global_
+# Experiment 36: β-warmup stabilization recipe — seed=32 (critical seed)
+
+defaults:
+  - override /model: moe_nl
+  - override /dataset: mixed
+
+experiment:
+  batch_name: moe-betawarmup-v1
+  exp_name: moe_betawarmup_a2e3_s32
+  tags: [moe, asym-warm, beta-warmup, stabilization, hf, simo-1x4, 16qam, nl-range]
+  notes: β-warmup stabilization, seed=32 (collapsed under exp26 recipe).
+  study_slug: 2026-04-26-moe-betawarmup-v1
+  study_path: experiments/2026-04-26-moe-betawarmup-v1
+  question: Does β-warmup stabilize the asym-warm recipe across seeds without over-correcting?
+
+runtime:
+  seed: 32
+
+model:
+  compute:
+    flops_penalty_alpha: 2e-3
+    load_balance_beta: 0.1
+    load_balance_beta_warmup_steps: 4000
+    load_balance_beta_warmup_value: 0.5
+
+training:
+  hf_dataset: Vack0/moe-5g-nrx
+  batch_size: 128
+  learning_rate: 1e-3
+  weight_decay: 1e-4
+  max_steps: 12000
+  freeze_experts: false
+  warm_start:
+    stem_checkpoint: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best"
+    experts:
+      nano: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_nano_final20k_constant_lr_s67-aos4hhid:best"
+      small: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_small_final20k_constant_lr_s67-kivdz4qu:best"
+
+validation:
+  every_n_steps: 500
+  snr_bins: 5
