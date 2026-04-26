@@ -38,11 +38,14 @@ echo
 
 build_eval_args() {
   local exp="$1" ckpt="$2"
+  # NOTE: qsub -v RUN_ARGS=... uses commas as variable separators, so passing
+  # `evaluation.profiles=[uma,tdlc,$SCENARIO]` here breaks. We bake the
+  # profiles list into the experiment YAML preset instead (which Hydra reads
+  # from disk, not the CLI) — see TODO when this script is actually run.
   local args=(
     "experiment=$exp"
     "evaluation.checkpoint_artifact=$ckpt"
     "evaluation.checkpoint=null"
-    "evaluation.profiles=[uma,tdlc,$SCENARIO]"
     "evaluation.data_dir=$DATA_ROOT/test"
     "validation.data_dir=$DATA_ROOT/val"
     "runtime.device=$RUNTIME_DEVICE"

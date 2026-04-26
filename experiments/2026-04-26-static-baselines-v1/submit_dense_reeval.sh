@@ -26,11 +26,12 @@ cd "$REPO_ROOT"
 
 build_eval_args() {
   local exp="$1" ckpt="$2"
+  # NOTE: don't pass evaluation.profiles=[uma,tdlc] — Hydra default already is
+  # [uma, tdlc], and brackets in qsub -v RUN_ARGS get mangled by PBS.
   printf '%s ' \
     "experiment=$exp" \
     "evaluation.checkpoint_artifact=$ckpt" \
     "evaluation.checkpoint=null" \
-    "evaluation.profiles=[uma,tdlc]" \
     "evaluation.snr_bins=7" \
     "evaluation.data_dir=$DATA_ROOT/test" \
     "validation.data_dir=$DATA_ROOT/val" \
