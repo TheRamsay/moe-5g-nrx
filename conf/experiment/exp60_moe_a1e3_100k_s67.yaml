@@ -1,0 +1,54 @@
+# @package _global_
+# Experiment 60: 100k samples × α=1e-3 (matches original anchor's α).
+#
+# exp40 (100k, α=2e-3, s67) and exp58 (100k, α=2e-3, s42) BOTH collapsed.
+# But the original asym-warm anchor (α=1e-3, full HF stream ~250k samples)
+# produced heterogeneous routing fine.
+#
+# Hypothesis: α=2e-3 is over-tuned for 100k. The effective FLOPs-penalty signal
+# scales with both α AND data-per-epoch — at 100k samples the stronger α tips
+# the balance toward early collapse before large can wake up.
+#
+# Predicted outcome: heterogeneous routing (matching original anchor pattern),
+# BLER ≈ 0.91 (slightly worse than exp26 because α is weaker, less compute pressure).
+# If correct → "α needs to be scaled inversely with data-per-epoch" is a clean
+# methodological finding for the report.
+
+defaults:
+  - override /model: moe_nl
+  - override /dataset: mixed
+
+experiment:
+  batch_name: data-scaling-100k-v1
+  exp_name: moe_a1e3_100k_s67_alpha_test
+  tags: [moe, data-scaling, alpha-scaling, asymmetric-warmstart, hf, simo-1x4, 16qam, nl-range]
+  notes: >
+    Tests the "α-data scaling" hypothesis: at 100k samples, α=1e-3 (original
+    anchor's α) instead of α=2e-3. If this succeeds where exp40/58 failed →
+    confirms α/data ratio matters, not data scale alone.
+  study_slug: 2026-04-30-data-scaling-100k-v1
+  study_path: experiments/2026-04-30-data-scaling-100k-v1
+  question: Does lowering α to 1e-3 (original anchor's value) recover routing at 100k?
+
+model:
+  compute:
+    flops_penalty_alpha: 1e-3
+    load_balance_beta: 0.1
+
+training:
+  hf_dataset: Vack0/moe-5g-nrx
+  batch_size: 128
+  learning_rate: 1e-3
+  weight_decay: 1e-4
+  max_steps: 12000
+  seed: 67
+  freeze_experts: false
+  warm_start:
+    stem_checkpoint: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best"
+    experts:
+      nano: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_nano_final20k_constant_lr_s67-aos4hhid:best"
+      small: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_small_final20k_constant_lr_s67-kivdz4qu:best"
+
+validation:
+  every_n_steps: 500
+  snr_bins: 5
