@@ -1,0 +1,15 @@
+# TDL-A Channel Profile: 3GPP Tapped-Delay-Line, low delay spread NLOS.
+# Used for OOD-style "in-family" generalization testing — model trained
+# on UMa+TDL-C, tested on TDL-A which has similar 3GPP statistics but
+# different delay spread + tap profile.
+defaults:
+  - base
+
+name: tdla
+channel_profile: tdla
+snr_db:
+  min: -10.0
+  max: 20.0
+delay_spread_s: 3.0e-8  # 30 ns — typical TDL-A spread (vs 500 ns TDL-C)
+min_speed_mps: 0.0
+max_speed_mps: 25.0

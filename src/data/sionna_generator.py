@@ -191,8 +191,13 @@ class SionnaNRXSimulator:
         if self.cfg.channel_profile is ChannelProfile.UMA:
             return self._sample_uma_channel(batch_size, freq, time)
 
-        if self.cfg.channel_profile is ChannelProfile.TDLC:
-            channel = self._get_or_create_tdl("C")
+        tdl_model = {
+            ChannelProfile.TDLA: "A",
+            ChannelProfile.TDLC: "C",
+            ChannelProfile.TDLD: "D",
+        }.get(self.cfg.channel_profile)
+        if tdl_model is not None:
+            channel = self._get_or_create_tdl(tdl_model)
             sampling_frequency = self.cfg.subcarrier_spacing_hz * float(freq)
             cir_coeffs, cir_delays = channel(
                 batch_size=batch_size,

@@ -9,6 +9,8 @@ class ChannelProfile(str, Enum):
 
     UMA = "uma"
     TDLC = "tdlc"
+    TDLA = "tdla"  # 3GPP TDL-A: low delay spread NLOS
+    TDLD = "tdld"  # 3GPP TDL-D: low delay spread Rician (LOS-dominant)
     MIXED = "mixed"  # Equal sampling from UMA and TDL-C
 
 
@@ -32,7 +34,7 @@ TEST_SEED_OFFSET: Final[int] = 1_000_000_000
 MIXED_PROFILE_SEED_OFFSET: Final[int] = 1_000_000
 
 # Profiles that can be used for data generation (excludes MIXED which is composed)
-GENERATABLE_PROFILES: Final[list[str]] = ["uma", "tdlc"]
+GENERATABLE_PROFILES: Final[list[str]] = ["uma", "tdlc", "tdla", "tdld"]
 
 
 def resolve_modulation(name: str | Modulation) -> Modulation:
