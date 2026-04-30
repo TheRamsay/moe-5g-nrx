@@ -114,6 +114,31 @@ Key findings from the figures:
 determines routing attractor" hypothesis** that motivated the symmetric sweep
 (exp56/exp57).
 
+### Router mechanism analysis (in flight, three sub-analyses)
+
+Quantitative + per-sample analysis of what the router actually does.
+`scripts/analyze_router_mechanism.py` produces three figures from one
+inference pass over UMa + TDLC test data (4k samples each):
+
+- **A. Linear probing** — train tiny linear classifiers/regressors on pooled
+  stem features (112-dim) to predict true SNR, channel power, delay spread,
+  profile (UMa vs TDLC). Quantifies the "implicit SNR encoding" hypothesis.
+  If SNR R² > 0.9 → strong publishable claim that stem learned the physics
+  from BCE+MSE alone, despite never being given these labels.
+- **C. Per-expert specialization** — SNR distribution per chosen expert,
+  BLER per expert across SNR bins, routing share per profile. Concrete
+  "what does each expert actually do?" with data.
+- **F. Decision boundary on PCA plane** — 5-NN vote on a dense grid in PCA
+  space colors routing decision regions; samples overlaid colored by true
+  SNR. Visual proof of "router decision boundary aligns with SNR contours."
+
+Job 19586663 submitted 2026-04-30 evening. Output:
+`docs/figures/router_mechanism_{linear_probing,expert_specialization,
+decision_boundary}.png` + JSON of probe scores.
+
+This is **the strongest single addition** to the consultation/report —
+turns "the model works" into "and here's exactly why."
+
 ### Symmetric asym-warm sweep (in flight, hypothesis test)
 
 Hypothesis from trajectory analysis: *"In heterogeneous-expert MoE, the
@@ -490,6 +515,7 @@ proper rigor.
 | 12 | **Per-SNR routing visualization** | ✅ done (`docs/figures/per_snr_routing_2zboo1rh.png`, exp26) |
 | 12b | **High-resolution per-SNR re-eval** (snr_bins=20) | ✅ done 2026-04-30; cleaner waterfall data for consultation slide |
 | 13 | **Channel-feature PCA-2D visualization** | ✅ done (`docs/figures/channel_feature_tsne_{uma,tdlc}.png`) — confirms implicit SNR encoding |
+| 13b | **Router mechanism analysis** (linear probing + expert specialization + decision boundary) | 🔄 in flight 2026-04-30 (job 19586663); 3 figures + JSON; quantifies stem-encodes-SNR hypothesis |
 | 14 | **Explicit SNR-input ablation** (exp38, use_input_statistics=true) | ✅ done 2026-04-29; collapsed to 100% large — implicit stem features sufficient |
 | 14b | **100k data scaling** — exp40 (s67) | ⚠️ done 2026-04-30; collapsed (likely bimodality at 100k scale) |
 | 14c | **100k retry seed=42** — exp58 | 🔄 in flight 2026-04-30; tests bimodality vs data-scale-induced instability |
@@ -513,13 +539,14 @@ re-baselining dense at bs=512. None move the rubric.
 - 30k convergence result (depends on exp59 finishing — final headline number)
 - Symmetric sweep result (depends on exp56/57 finishing — hypothesis test)
 
-**Cluster jobs in flight as of 2026-04-30 evening (8 jobs):**
+**Cluster jobs in flight as of 2026-04-30 evening (8+ jobs):**
 - 19583495 — dense_micro pretrain
 - 19586235 — O1_3p5 OOD test data generation
 - 19586392 — exp56 cold-small (symmetric sweep)
 - 19586393 — exp57 cold-nano (symmetric sweep)
 - 19586443 — exp58 100k seed=42 retry
 - 19586548 — exp59 30k convergence run
+- 19586663 — router mechanism analysis (linear probing + specialization + decision boundary)
 
 ## vs MEAN (van Bolderik et al., 2024)
 
