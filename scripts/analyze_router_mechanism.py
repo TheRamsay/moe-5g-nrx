@@ -68,6 +68,63 @@ def _download_artifact(ref: str) -> Path:
     raise FileNotFoundError(f"No .pt file in {art_dir}")
 
 
+def _compute_advanced_channel_features(channel_targets: torch.Tensor) -> dict[str, np.ndarray]:
+    """Compute physical channel features from the ground-truth H tensor.
+
+    Args:
+        channel_targets: (batch, 2*N, freq, time) real/imag stacked channel.
+    Returns:
+        Dict of (batch,) numpy arrays for each feature.
+    """
+    n_ant = channel_targets.shape[1] // 2
+    h_real = channel_targets[:, :n_ant]
+    h_imag = channel_targets[:, n_ant:]
+    h = torch.complex(h_real, h_imag)  # (batch, n_ant, freq, time)
+
+    # A. Real RMS delay spread via IFFT along freq → CIR → power-delay-profile moments
+    cir = torch.fft.ifft(h, dim=2)  # (batch, n_ant, freq, time)
+    pdp = (cir.real**2 + cir.imag**2).mean(dim=(1, 3))  # (batch, freq) power-delay-profile
+    delays = torch.arange(pdp.shape[1], dtype=pdp.dtype, device=pdp.device)
+    pdp_norm = pdp / pdp.sum(dim=1, keepdim=True).clamp_min(1e-12)
+    tau_mean = (delays * pdp_norm).sum(dim=1)
+    tau_rms = (((delays - tau_mean.unsqueeze(1)) ** 2) * pdp_norm).sum(dim=1).clamp_min(1e-12).sqrt()
+
+    # B. Coherence bandwidth ≈ 1 / (5 · τ_rms)  (in normalised delay-bin units)
+    coh_bw = 1.0 / (5.0 * tau_rms.clamp_min(1e-6))
+
+    # C. Spatial correlation across antennas — eigenvalue summary of R = h h^H / N
+    h_flat = h.reshape(h.shape[0], n_ant, -1)  # (batch, n_ant, freq*time)
+    R = torch.einsum("bif,bjf->bij", h_flat, torch.conj(h_flat)) / h_flat.shape[-1]
+    # R is Hermitian by construction; eigvalsh returns real ascending eigenvalues
+    eigs = torch.linalg.eigvalsh(R).clamp_min(0)  # (batch, n_ant)
+    spatial_trace = eigs.sum(dim=1)
+    spatial_max_eig = eigs[:, -1]
+    spatial_min_eig = eigs[:, 0]
+    spatial_cond = spatial_max_eig / spatial_min_eig.clamp_min(1e-12)
+    spatial_det = eigs.prod(dim=1)
+
+    # D. K-factor (Rician LOS power ratio): peak CIR tap power / mean tap power
+    pdp_per_sample = (cir.real**2 + cir.imag**2).mean(dim=1).mean(dim=2)  # (batch, freq) over ant+time
+    peak_pow = pdp_per_sample.max(dim=1).values
+    mean_pow = pdp_per_sample.mean(dim=1).clamp_min(1e-12)
+    k_factor = peak_pow / mean_pow
+
+    # E. Doppler / time-variation rate: variance of channel magnitude across time
+    h_pow = (h.real**2 + h.imag**2).sum(dim=1)  # (batch, freq, time)
+    doppler_proxy = h_pow.var(dim=2).mean(dim=1)  # variance across time, mean over freq
+
+    return {
+        "rms_delay_spread": tau_rms.cpu().numpy(),
+        "coherence_bw": coh_bw.cpu().numpy(),
+        "spatial_trace": spatial_trace.cpu().numpy(),
+        "spatial_max_eig": spatial_max_eig.cpu().numpy(),
+        "spatial_cond": spatial_cond.cpu().numpy(),
+        "spatial_det": spatial_det.cpu().numpy(),
+        "k_factor": k_factor.cpu().numpy(),
+        "doppler_proxy": doppler_proxy.cpu().numpy(),
+    }
+
+
 def collect_data(model, loader, device, max_samples: int):
     """Run forward pass; capture stem features, routing, SNR, channel targets, BLER."""
     model.eval()
@@ -84,6 +141,9 @@ def collect_data(model, loader, device, max_samples: int):
     chan_powers: list[np.ndarray] = []
     delay_spreads: list[np.ndarray] = []
     block_errors: list[np.ndarray] = []
+    router_probs_list: list[np.ndarray] = []
+    router_entropy_list: list[np.ndarray] = []
+    advanced_features: dict[str, list[np.ndarray]] = {}
     n_collected = 0
 
     with torch.inference_mode():
@@ -109,10 +169,24 @@ def collect_data(model, loader, device, max_samples: int):
             chan_powers.append(cp)
 
             # Crude "delay spread" proxy: variance of channel power across freq dim
-            #   (real channels have specific delay patterns; this captures spread)
             h_mag = (h_real**2 + h_imag**2).sum(dim=1).cpu().numpy()  # (B, freq, time)
             ds = h_mag.var(axis=1).mean(axis=1)
             delay_spreads.append(ds)
+
+            # Advanced channel features (RMS delay, coherence BW, spatial corr, K-factor, Doppler)
+            adv = _compute_advanced_channel_features(channel_targets)
+            for k, v in adv.items():
+                advanced_features.setdefault(k, []).append(v)
+
+            # Router probs + entropy (F + G)
+            rp = out.get("router_probs")
+            if rp is not None:
+                rp_np = rp.cpu().numpy()
+                router_probs_list.append(rp_np)
+                # entropy per sample
+                rp_clamp = np.clip(rp_np, 1e-12, 1.0)
+                ent = -(rp_clamp * np.log(rp_clamp)).sum(axis=1)
+                router_entropy_list.append(ent)
 
             # Per-sample block errors (any bit wrong)
             preds = (out["logits"] > 0).long()
@@ -122,7 +196,7 @@ def collect_data(model, loader, device, max_samples: int):
             n_collected += x.shape[0]
 
     handle.remove()
-    return {
+    result = {
         "feats": np.concatenate(feats, axis=0)[:max_samples],
         "experts": np.concatenate(experts, axis=0)[:max_samples],
         "snr_db": np.concatenate(snrs, axis=0)[:max_samples],
@@ -130,6 +204,12 @@ def collect_data(model, loader, device, max_samples: int):
         "delay_spread": np.concatenate(delay_spreads, axis=0)[:max_samples],
         "block_err": np.concatenate(block_errors, axis=0)[:max_samples],
     }
+    for k, vs in advanced_features.items():
+        result[k] = np.concatenate(vs, axis=0)[:max_samples]
+    if router_probs_list:
+        result["router_probs"] = np.concatenate(router_probs_list, axis=0)[:max_samples]
+        result["router_entropy"] = np.concatenate(router_entropy_list, axis=0)[:max_samples]
+    return result
 
 
 def linear_probing(data_uma: dict, data_tdlc: dict, out_dir: Path) -> dict:
@@ -150,48 +230,78 @@ def linear_probing(data_uma: dict, data_tdlc: dict, out_dir: Path) -> dict:
     tr, te = perm[:split], perm[split:]
     results["profile_acc"] = _binary_classification_acc(X_all[tr], profile_labels[tr], X_all[te], profile_labels[te])
 
-    # Per-profile probes for SNR / channel_power / delay_spread (regression)
+    # Per-profile probes for physical channel features (regression)
+    physical_targets = [
+        # Original three
+        ("snr", "snr_db"),
+        ("chan_power", "chan_power"),
+        ("delay_spread", "delay_spread"),
+        # New physical features (A-E)
+        ("rms_delay", "rms_delay_spread"),
+        ("coherence_bw", "coherence_bw"),
+        ("spatial_trace", "spatial_trace"),
+        ("spatial_max_eig", "spatial_max_eig"),
+        ("spatial_cond", "spatial_cond"),
+        ("k_factor", "k_factor"),
+        ("doppler", "doppler_proxy"),
+    ]
     for prof_name, d in [("uma", data_uma), ("tdlc", data_tdlc)]:
         X = d["feats"]
         n = len(X)
         perm = rng.permutation(n)
         split = int(0.7 * n)
         tr, te = perm[:split], perm[split:]
-        for target_name, y in [
-            ("snr", d["snr_db"]),
-            ("chan_power", d["chan_power"]),
-            ("delay_spread", d["delay_spread"]),
-        ]:
+        for target_name, key in physical_targets:
+            if key not in d:
+                continue
+            y = d[key]
             r2 = _linear_regression_r2(X[tr], y[tr], X[te], y[te])
             results[f"{prof_name}/{target_name}_r2"] = r2
 
-    # Build summary plot — bar chart of probe scores
-    fig, ax = plt.subplots(figsize=(11, 5))
-    labels = []
-    scores = []
-    bar_colors = []
+        # F. Probe router probabilities (one per expert)
+        if "router_probs" in d:
+            rp = d["router_probs"]
+            for e_idx, e_name in enumerate(EXPERT_NAMES):
+                r2 = _linear_regression_r2(X[tr], rp[tr, e_idx], X[te], rp[te, e_idx])
+                results[f"{prof_name}/p_{e_name}_r2"] = r2
+
+        # G. Probe router entropy
+        if "router_entropy" in d:
+            r2 = _linear_regression_r2(X[tr], d["router_entropy"][tr], X[te], d["router_entropy"][te])
+            results[f"{prof_name}/router_entropy_r2"] = r2
+
+    # Build summary plot — group bars by probe category, side-by-side UMa vs TDLC
+    # Group results by target name (strip "uma/" or "tdlc/" prefix)
+    grouped: dict[str, dict[str, float]] = {}
     for k, v in results.items():
-        labels.append(k)
-        scores.append(v)
-        bar_colors.append("#377eb8" if "r2" in k else "#4daf4a")
-    bars = ax.bar(labels, scores, color=bar_colors, edgecolor="black", linewidth=0.7)
-    for bar, sc in zip(bars, scores):
-        ax.text(
-            bar.get_x() + bar.get_width() / 2,
-            sc + 0.02,
-            f"{sc:.3f}",
-            ha="center",
-            va="bottom",
-            fontsize=9.5,
-            fontweight="bold",
-        )
+        if "/" in k:
+            prof, name = k.split("/", 1)
+            grouped.setdefault(name, {})[prof] = v
+        else:
+            grouped.setdefault(k, {})["combined"] = v
+
+    fig, ax = plt.subplots(figsize=(15, 6))
+    target_names = list(grouped.keys())
+    x = np.arange(len(target_names))
+    bw = 0.4
+    uma_vals = [grouped[t].get("uma", grouped[t].get("combined", 0.0)) for t in target_names]
+    tdlc_vals = [grouped[t].get("tdlc", grouped[t].get("combined", 0.0)) for t in target_names]
+    bars_u = ax.bar(x - bw / 2, uma_vals, bw, label="UMa", color="#5b9bd5", edgecolor="black", linewidth=0.6)
+    bars_t = ax.bar(x + bw / 2, tdlc_vals, bw, label="TDLC", color="#1f4e79", edgecolor="black", linewidth=0.6)
+    for bar, sc in zip(bars_u, uma_vals):
+        if sc > 0.05:
+            ax.text(bar.get_x() + bar.get_width() / 2, sc + 0.015, f"{sc:.2f}", ha="center", fontsize=8)
+    for bar, sc in zip(bars_t, tdlc_vals):
+        if sc > 0.05:
+            ax.text(bar.get_x() + bar.get_width() / 2, sc + 0.015, f"{sc:.2f}", ha="center", fontsize=8)
     ax.set_ylim(0, 1.1)
     ax.axhline(y=1.0, color="gray", linestyle="--", alpha=0.4)
-    ax.set_ylabel("Probe score (R² for regression, accuracy for classification)")
-    ax.set_title(
-        "Linear probes on stem features: what does the stem encode about the channel?", fontsize=12, fontweight="bold"
-    )
-    ax.set_xticklabels(labels, rotation=30, ha="right")
+    ax.set_ylabel("Probe R² (regression) / accuracy (profile_acc)")
+    ax.set_title("Linear probes on stem features — UMa vs TDLC, all targets", fontsize=12, fontweight="bold")
+    ax.set_xticks(x)
+    ax.set_xticklabels(target_names, rotation=35, ha="right", fontsize=9)
+    ax.legend(loc="upper right")
+    ax.grid(True, axis="y", alpha=0.25)
     plt.tight_layout()
     out_path = out_dir / "router_mechanism_linear_probing.png"
     fig.savefig(out_path, dpi=140, bbox_inches="tight")
