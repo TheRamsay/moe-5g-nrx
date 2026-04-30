@@ -1,0 +1,30 @@
+# @package _global_
+# Eval47: high-resolution per-SNR re-eval of dense_large baseline.
+# Companion to eval46 (exp26) — same 20-bin resolution for clean comparison.
+
+defaults:
+  - override /model: static_dense
+  - override /dataset: mixed
+
+experiment:
+  batch_name: dense-snr-eval-v1
+  exp_name: eval_dense_large_snr20bins
+  tags: [eval, dense, dense-snr, simo-1x4, 16qam, baseline]
+  notes: >
+    High-resolution per-SNR re-eval of dense_large baseline.
+    20 bins across the SNR sweep — for waterfall figure vs exp26.
+  study_slug: 2026-04-30-dense-snr-eval-v1
+  study_path: experiments/2026-04-30-dense-snr-eval-v1
+  question: What does dense_large's BLER@SNR curve look like at finer resolution?
+
+model:
+  backbone:
+    stem_hidden_dims: [64, 64]
+    num_cnn_blocks: 8
+    block_hidden_dim: 64
+    readout_hidden_dim: 128
+
+evaluation:
+  profiles: [uma, tdlc]
+  snr_bins: 20
+  use_artifacts: false

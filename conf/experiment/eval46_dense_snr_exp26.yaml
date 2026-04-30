@@ -1,0 +1,25 @@
+# @package _global_
+# Eval46: high-resolution per-SNR re-eval of exp26.
+# Re-uses the existing test set; just bins finer (20 bins instead of 7).
+# Provides smoother BLER@SNR curves for the waterfall figure.
+
+defaults:
+  - override /model: moe_nl
+  - override /dataset: mixed
+
+experiment:
+  batch_name: dense-snr-eval-v1
+  exp_name: eval_exp26_a2e3_snr20bins
+  tags: [eval, moe, dense-snr, asym-warm, simo-1x4, 16qam]
+  notes: >
+    High-resolution per-SNR re-eval of exp26 (alpha=2e-3, seed 67).
+    20 bins across the SNR sweep instead of 7 → ~1.5 dB resolution in
+    the waterfall region.
+  study_slug: 2026-04-30-dense-snr-eval-v1
+  study_path: experiments/2026-04-30-dense-snr-eval-v1
+  question: What does exp26's BLER@SNR curve look like at finer resolution?
+
+evaluation:
+  profiles: [uma, tdlc]
+  snr_bins: 20
+  use_artifacts: false
