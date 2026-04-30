@@ -1,0 +1,47 @@
+# @package _global_
+# Phase 2 v1 base + Switch Transformer auxiliary loss with weight=1e-3.
+# Sweep: tests whether stronger Switch aux can prevent the Phase 2 collapse
+# to large. Single seed (67) for hyperparameter sweep efficiency.
+
+defaults:
+  - override /model: moe_nl
+  - override /dataset: mixed
+
+experiment:
+  batch_name: anti-collapse-switch-aux-v1
+  exp_name: phase2_switch_aux_w1e_3_s67
+  tags: [moe, anti-collapse, switch-aux-sweep, phase2, hf, simo-1x4, 16qam]
+  notes: >
+    Phase 2 v1 (full warm start) + Switch Transformer auxiliary loss
+    weight=1e-3. Tests whether properly tuned Switch aux loss
+    can prevent the Phase 2 collapse to large. Originally tested as
+    single-shot in early exploration; this is the proper sweep.
+  study_slug: 2026-04-30-anti-collapse-sweeps-v1
+  study_path: experiments/2026-04-30-anti-collapse-sweeps-v1
+  question: Does Switch aux loss at weight=1e-3 prevent Phase 2 large-collapse?
+
+model:
+  compute:
+    flops_penalty_alpha: 1e-3
+    load_balance_beta: 0.1
+    switch_aux_weight: 1e-3
+
+training:
+  hf_dataset: Vack0/moe-5g-nrx
+  batch_size: 128
+  learning_rate: 1e-3
+  weight_decay: 1e-4
+  max_steps: 12000
+  seed: 67
+  freeze_experts: true
+  unfreeze_experts_at_step: 2000
+  warm_start:
+    stem_checkpoint: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best"
+    experts:
+      nano: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_nano_final20k_constant_lr_s67-aos4hhid:best"
+      small: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_small_final20k_constant_lr_s67-kivdz4qu:best"
+      large: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best"
+
+validation:
+  every_n_steps: 500
+  snr_bins: 5

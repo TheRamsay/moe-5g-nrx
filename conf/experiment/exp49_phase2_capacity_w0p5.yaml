@@ -1,0 +1,48 @@
+# @package _global_
+# Phase 2 v1 base + soft capacity penalty with weight=0.5, factor=1.5.
+# Sweep: tests whether stronger capacity penalty can prevent Phase 2 collapse.
+# capacity_factor=1.5 → max 50% per expert (3-expert setup).
+
+defaults:
+  - override /model: moe_nl
+  - override /dataset: mixed
+
+experiment:
+  batch_name: anti-collapse-capacity-v1
+  exp_name: phase2_capacity_w0p5_s67
+  tags: [moe, anti-collapse, capacity-sweep, phase2, hf, simo-1x4, 16qam]
+  notes: >
+    Phase 2 v1 (full warm start) + soft capacity penalty weight=0.5
+    at capacity_factor=1.5 (50% per-expert max). Tests whether stronger
+    capacity constraints prevent collapse. Original single-shot attempt
+    failed; this is the proper sweep.
+  study_slug: 2026-04-30-anti-collapse-sweeps-v1
+  study_path: experiments/2026-04-30-anti-collapse-sweeps-v1
+  question: Does capacity weight=0.5 prevent Phase 2 large-collapse?
+
+model:
+  compute:
+    flops_penalty_alpha: 1e-3
+    load_balance_beta: 0.1
+    capacity_weight: 0.5
+    capacity_factor: 1.5
+
+training:
+  hf_dataset: Vack0/moe-5g-nrx
+  batch_size: 128
+  learning_rate: 1e-3
+  weight_decay: 1e-4
+  max_steps: 12000
+  seed: 67
+  freeze_experts: true
+  unfreeze_experts_at_step: 2000
+  warm_start:
+    stem_checkpoint: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best"
+    experts:
+      nano: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_nano_final20k_constant_lr_s67-aos4hhid:best"
+      small: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_small_final20k_constant_lr_s67-kivdz4qu:best"
+      large: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best"
+
+validation:
+  every_n_steps: 500
+  snr_bins: 5
