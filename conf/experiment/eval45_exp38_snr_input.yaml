@@ -1,0 +1,26 @@
+# @package _global_
+# Eval-only preset for exp38 (MoE with explicit SNR-proxy input statistics).
+
+defaults:
+  - override /model: moe_nl
+  - override /dataset: mixed
+
+experiment:
+  batch_name: moe-snr-input-v1
+  exp_name: eval_exp38_snr_input_a2e3_s67
+  tags: [eval, moe, snr-input, asymmetric-warmstart, simo-1x4, 16qam]
+  notes: >
+    Test-set eval for exp38 (use_input_statistics=true, α=2e-3, seed 67).
+    Compares against exp26 to test whether explicit SNR-proxy features help routing.
+  study_slug: 2026-04-29-moe-snr-input-v1
+  study_path: experiments/2026-04-29-moe-snr-input-v1
+  question: Does explicit channel_power/channel_variance in router input improve on exp26?
+
+model:
+  router:
+    use_input_statistics: true
+
+evaluation:
+  profiles: [uma, tdlc]
+  snr_bins: 7
+  use_artifacts: false

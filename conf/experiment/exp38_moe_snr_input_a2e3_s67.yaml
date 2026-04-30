@@ -1,0 +1,48 @@
+# @package _global_
+# Experiment 38: MoE with explicit input statistics in router — α=2e-3, seed 67
+# Same recipe as exp26 (the Pareto knee) but router also receives 3 scalar
+# domain features: received_power, channel_power, channel_variance.
+# channel_power/received_power ≈ SNR proxy; channel_variance ≈ frequency selectivity.
+# Tests whether explicit domain knowledge improves on exp26's implicit routing.
+
+defaults:
+  - override /model: moe_nl
+  - override /dataset: mixed
+
+experiment:
+  batch_name: moe-snr-input-v1
+  exp_name: moe_snr_input_a2e3_s67
+  tags: [moe, snr-input, asymmetric-warmstart, hf, simo-1x4, 16qam, nl-range]
+  notes: >
+    Explicit domain knowledge in router: use_input_statistics=true adds channel
+    power and variance (SNR proxies) alongside pooled stem features. Identical
+    to exp26 otherwise (α=2e-3, asym warm-start, seed 67). Tests whether
+    implicit stem features already capture SNR or explicit features help.
+  study_slug: 2026-04-29-moe-snr-input-v1
+  study_path: experiments/2026-04-29-moe-snr-input-v1
+  question: Does adding explicit SNR-proxy input statistics to the router improve on exp26?
+
+model:
+  router:
+    use_input_statistics: true
+  compute:
+    flops_penalty_alpha: 2e-3
+    load_balance_beta: 0.1
+
+training:
+  hf_dataset: Vack0/moe-5g-nrx
+  batch_size: 128
+  learning_rate: 1e-3
+  weight_decay: 1e-4
+  max_steps: 12000
+  seed: 67
+  freeze_experts: false
+  warm_start:
+    stem_checkpoint: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best"
+    experts:
+      nano: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_nano_final20k_constant_lr_s67-aos4hhid:best"
+      small: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_small_final20k_constant_lr_s67-kivdz4qu:best"
+
+validation:
+  every_n_steps: 500
+  snr_bins: 5
