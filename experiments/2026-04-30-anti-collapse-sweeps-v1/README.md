@@ -101,12 +101,38 @@ routing probabilities (exp_flops=0.544) but at hard top-1 inference, every
 sample still picks large. The BCE gradient pulling to warm-large dominates
 at the top-1 decision boundary, even when the soft loss penalises imbalance.
 
-**Capacity sweep (exp48-51) in flight at time of writing.**
+## Results — Capacity sweep (DONE 2026-04-30)
+
+| Exp | Job | capacity_weight | UMa BLER | TDLC BLER | exp_flops | real_flops | Outcome |
+|---|---|---:|---:|---:|---:|---:|---|
+| exp48 | 19584459 | 0.1 | 0.931 | 0.840 | 1.000 | **1.000** | weak penalty → full collapse |
+| exp49 | 19584460 | 0.5 | 0.972 | 0.959 | 0.605 | 0.675 | spreads routing but BLER tanks |
+| exp50 | 19584461 | 2.0 | 0.977 | 0.970 | 0.561 | 0.497 | very spread, BLER worse still |
+| exp51 | 19584462 | 10.0 | 0.946 | 0.881 | 0.639 | 0.600 | partial recovery (~60% FLOPs) but still 1pp worse than exp26 |
+
+**Two failure modes characterized:**
+- **Weak penalty (0.1):** doesn't prevent collapse → 100% large
+- **Strong penalty (0.5+):** prevents collapse but the experts haven't co-trained
+  for that routing → BLER craters
+- **Very strong penalty (10):** finds a similar operating point to exp26 by brute
+  force, but still 1pp worse because it forces a routing pattern the experts
+  didn't co-train for.
+
+**No middle ground exists** where capacity penalty alone gives both routing
+diversity AND good BLER.
+
+## Combined sweep summary (8 jobs total)
+
+| Mechanism | Weights tested | Result |
+|---|---|---|
+| Switch aux loss | 1e-3, 1e-2, 1e-1, 1e0 | All 4 → 100% large collapse |
+| Soft capacity penalty | 0.1, 0.5, 2.0, 10.0 | 0.1 collapses; 0.5–10 spread routing but kill BLER |
 
 ## Implications
 
-For the consultation: the original "Switch aux failed" claim was based on a
-single-shot run. We now have a **proper sweep across 4 orders of magnitude**
-that confirms the result. This strengthens the asym-warm-as-only-recipe
-narrative — Switch aux fundamentally cannot fix Phase 2 collapse, regardless
-of weight tuning.
+For the consultation: the original "Switch aux + capacity failed" claims were
+based on single-shot runs. We now have **proper sweeps across 4 orders of
+magnitude for each**, with all 8 runs failing to recover heterogeneous
+routing + good BLER. This strengthens the asym-warm-as-only-recipe narrative
+— regularizers fundamentally cannot fix the Phase 2 collapse, regardless of
+weight tuning.

@@ -70,20 +70,99 @@ This narrows the OOD weakness from "all unfamiliar channels" to specifically
 "the synthetic-stochastic vs ray-traced-geometric gap" (DeepMIMO ASU still
 fails catastrophically; in-family 3GPP works fine).
 
-### Anti-collapse sweep — Switch aux loss (4 weights, all collapsed)
+### Anti-collapse sweep — Switch aux + capacity (8 runs, all failed)
 
-Re-ran the original "Switch aux failed" claim with proper hyperparameter sweep:
+Re-ran both anti-collapse mechanisms with proper hyperparameter sweeps.
+
+**Switch aux loss (4 weights, all collapsed):**
 
 | Exp | switch_aux_weight | TDLC BLER | exp_flops | real_flops | Outcome |
 |---|---:|---:|---:|---:|---|
 | exp44 | 1e-3 | 0.844 | 1.000 | 1.000 | full collapse to large |
 | exp45 | 1e-2 | 0.844 | 1.000 | 1.000 | full collapse to large |
 | exp46 | 1e-1 | 0.840 | 1.000 | 1.000 | full collapse to large |
-| exp47 | 1e0 | 0.859 | 0.544 | 0.996 | soft routing has high entropy but argmax still picks large 99.6% of time |
+| exp47 | 1e0 | 0.859 | 0.544 | 0.996 | soft routing has high entropy but argmax picks large 99.6% |
 
-**Original "single-shot Switch aux failed" claim now properly characterized
-across 4 orders of magnitude.** No weight value prevents the Phase 2 collapse.
-Capacity sweep (exp48-51) is in progress.
+**Soft capacity penalty (4 weights, two failure modes):**
+
+| Exp | capacity_weight | TDLC BLER | real_flops | Outcome |
+|---|---:|---:|---:|---|
+| exp48 | 0.1 | 0.840 | 1.000 | weak penalty → full collapse |
+| exp49 | 0.5 | 0.959 | 0.675 | spread routing but BLER tanks (+9 pp) |
+| exp50 | 2.0 | 0.970 | 0.497 | very spread, BLER even worse |
+| exp51 | 10.0 | 0.881 | 0.600 | partial recovery (~60% FLOPs) but still 1pp worse than exp26 |
+
+**No middle ground exists** for either mechanism where you get heterogeneous
+routing AND good BLER. Original "single-shot failed" claim now properly
+characterized across 4 orders of magnitude × 2 mechanisms = 8 runs.
+
+### Routing trajectory analysis (2026-04-30 evening, killer figure)
+
+Pulled training-step trajectories for routing distributions and entropy across
+the 3 paradigms + anti-collapse sweeps. Saved as `docs/figures/
+routing_trajectories_{collapse_modes,bimodal_seeds,anti_collapse}.png`.
+
+Key findings from the figures:
+- **Phase 2 v1**: router commits to large at step ~50, entropy → 0 instantly
+- **Phase 1**: router commits to small/nano at step ~1000
+- **Asym warm s67**: stays exploratory until step ~10000, gradual rebalancing
+- **Bimodal seeds**: s67 vs s42 trajectories diverge subtly in steps 0-2000
+- **All 8 anti-collapse sweeps**: each commits to a bad pattern within first
+  few thousand steps; none recover heterogeneous + good BLER
+
+**This figure is the visual proof of the "expert-quality gap at initialization
+determines routing attractor" hypothesis** that motivated the symmetric sweep
+(exp56/exp57).
+
+### Symmetric asym-warm sweep (in flight, hypothesis test)
+
+Hypothesis from trajectory analysis: *"In heterogeneous-expert MoE, the
+expert with the largest initial quality lead becomes the routing attractor.
+Asymmetric initialization shifts which expert wins."*
+
+Two new runs to test the principle:
+
+| Exp | Setup | Quality at step 0 | Predicted outcome |
+|---|---|---|---|
+| exp26 (existing) | warm-nano + warm-small + COLD-large | nano 0.97, small 0.91, large 0.99 random | heterogeneous ✓ (DONE) |
+| exp56 (in flight) | warm-nano + COLD-small + warm-large | nano 0.97, small 0.99 random, large 0.87 | uncertain — may collapse to large |
+| exp57 (in flight) | COLD-nano + warm-small + warm-large | nano 0.99 random, small 0.91, large 0.87 | most pessimistic — cold-nano has no capacity advantage |
+
+If both succeed → "cold-expert grows in" generalizes (publishable principle).
+If both fail → exp26's recipe is privileged (cold-LARGE specifically works).
+
+### 100k data scaling — bimodality strikes again
+
+Concern raised in consultation: 50k samples might be too small. Tested at 100k.
+
+| Run | Data | Seed | Avg BLER | real_flops | Outcome |
+|---|---:|---:|---:|---:|---|
+| exp26 (50k headline) | 50k | 67 | 0.902 | 0.56 | heterogeneous ✓ |
+| **exp40 (100k retry)** | **100k** | 67 | **~0.953** | **0.465** | **collapsed ✗** |
+| exp58 (100k seed 42) | 100k | 42 | (in flight) | | testing bimodality |
+
+**More data → WORSE BLER (+5 pp).** Routing pattern matches s32 collapse
+signature. Likely the asym-warm bimodality hit at 100k scale. Awaiting exp58
+(seed 42 retry) to distinguish "bad luck" from "data scale exacerbates
+instability."
+
+### Convergence study (in flight) — 30k step extension of exp26
+
+All ablations use 12k steps (fair comparison budget — standard ML practice).
+exp59 trains exp26 recipe at 30k for the final-report headline number.
+
+Existing 20k extension data showed TDLC BLER dropping 0.867 → 0.851 between
+12k and 16k, suggesting 12k is mildly under-converged. Final headline number
+likely 1-2 pp better than 0.902.
+
+### O1_3p5 DeepMIMO OOD (in flight)
+
+ASU campus failed catastrophically (BLER 0.99). Testing O1_3p5 (Outdoor
+Street at 3.5 GHz — same carrier, simpler geometry) to determine whether
+ASU was specifically pathological or all ray-traced outdoor fails.
+
+Generation job 19586235 in flight. Eval jobs ready to submit once data is
+generated.
 
 ### Wall-clock latency — real data (corrected story)
 
@@ -399,7 +478,10 @@ proper rigor.
 | 7 | **Large-warmup stabilization** (exp32/33/34) | ✅ done; over-corrects to 100% large in 3/3 seeds (negative result) |
 | 8 | **β-warmup stabilization** (exp35/36/37) | ✅ done; mean BLER worse than baseline (negative result) |
 | 8b | **Switch-aux loss sweep** (exp44–47, weights 1e-3..1e0) | ✅ done 2026-04-30; **all 4 collapsed** — proper sweep confirms original single-shot finding |
-| 8c | **Capacity penalty sweep** (exp48–51, weights 0.1..10) | 🔄 in flight 2026-04-30 |
+| 8c | **Capacity penalty sweep** (exp48–51, weights 0.1..10) | ✅ done 2026-04-30; two failure modes — collapse OR forced routing kills BLER |
+| 8d | **Routing trajectory analysis** (W&B history → matplotlib) | ✅ done 2026-04-30; killer figures showing collapse dynamics across 11 runs |
+| 8e | **Symmetric asym-warm sweep** (exp56 cold-small, exp57 cold-nano) | 🔄 in flight 2026-04-30; tests "cold-expert grows in" generalization |
+| 8f | **30k convergence study** (exp59) | 🔄 in flight 2026-04-30; final-report headline number for exp26 recipe |
 | 9 | **Static + SNR-oracle cascade baseline** (D analysis) | ✅ done; exp26 on Pareto frontier; oracle cascade slightly better at same BLER |
 | 9b | **Classical LMMSE / Genie-MRC / single-ant baselines** | ✅ done 2026-04-30; complete classical ladder vs neural results |
 | 10 | **DeepMIMO few-shot fine-tune** | ✅ done; both models stuck at ~0.99 OOD BLER (negative result, no catastrophic forgetting) |
@@ -409,7 +491,8 @@ proper rigor.
 | 12b | **High-resolution per-SNR re-eval** (snr_bins=20) | ✅ done 2026-04-30; cleaner waterfall data for consultation slide |
 | 13 | **Channel-feature PCA-2D visualization** | ✅ done (`docs/figures/channel_feature_tsne_{uma,tdlc}.png`) — confirms implicit SNR encoding |
 | 14 | **Explicit SNR-input ablation** (exp38, use_input_statistics=true) | ✅ done 2026-04-29; collapsed to 100% large — implicit stem features sufficient |
-| 14b | **100k data scaling** — exp40 | 🔄 in flight 2026-04-30 (export done, training started); tests teacher's "50k might be small" concern |
+| 14b | **100k data scaling** — exp40 (s67) | ⚠️ done 2026-04-30; collapsed (likely bimodality at 100k scale) |
+| 14c | **100k retry seed=42** — exp58 | 🔄 in flight 2026-04-30; tests bimodality vs data-scale-induced instability |
 | 15 | Doc cleanup: checkpoint_report rewrite | NOT STARTED — biggest remaining item |
 | 15b | **Defense brief (en+cz) + Jupyter presentation notebook** | ✅ done 2026-04-29/30 |
 | 15c | **Teacher feedback notes + 13-day action plan** | ✅ done 2026-04-30 (`docs/teacher_feedback_2026-04-30.md`) |
@@ -424,10 +507,19 @@ re-baselining dense at bs=512. None move the rubric.
 - Router interpretability beyond PCA (saliency maps, per-expert feature analysis)
 - LaTeX checkpoint report rewrite (THE biggest remaining item)
 - Poster
-- {nano, micro-small, large} eval (depends on exp43 finishing)
-- Capacity sweep results (depends on exp48-51 finishing)
-- 100k vs 50k comparison (depends on exp40 finishing)
-- O1_3p5 OOD eval (depends on data generation)
+- {nano, micro-small, large} eval (depends on exp43 finishing — exp42 dense_micro pretrain still running)
+- 100k seed-42 retry result (depends on exp58 finishing — tests bimodality)
+- O1_3p5 OOD eval (depends on data generation finishing)
+- 30k convergence result (depends on exp59 finishing — final headline number)
+- Symmetric sweep result (depends on exp56/57 finishing — hypothesis test)
+
+**Cluster jobs in flight as of 2026-04-30 evening (8 jobs):**
+- 19583495 — dense_micro pretrain
+- 19586235 — O1_3p5 OOD test data generation
+- 19586392 — exp56 cold-small (symmetric sweep)
+- 19586393 — exp57 cold-nano (symmetric sweep)
+- 19586443 — exp58 100k seed=42 retry
+- 19586548 — exp59 30k convergence run
 
 ## vs MEAN (van Bolderik et al., 2024)
 
