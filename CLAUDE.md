@@ -114,30 +114,55 @@ Key findings from the figures:
 determines routing attractor" hypothesis** that motivated the symmetric sweep
 (exp56/exp57).
 
-### Router mechanism analysis (in flight, three sub-analyses)
+### Router mechanism analysis (DONE 2026-04-30 evening)
 
-Quantitative + per-sample analysis of what the router actually does.
-`scripts/analyze_router_mechanism.py` produces three figures from one
-inference pass over UMa + TDLC test data (4k samples each):
+Three sub-analyses from one inference pass over UMa + TDLC test data (4k each):
 
-- **A. Linear probing** — train tiny linear classifiers/regressors on pooled
-  stem features (112-dim) to predict true SNR, channel power, delay spread,
-  profile (UMa vs TDLC). Quantifies the "implicit SNR encoding" hypothesis.
-  If SNR R² > 0.9 → strong publishable claim that stem learned the physics
-  from BCE+MSE alone, despite never being given these labels.
-- **C. Per-expert specialization** — SNR distribution per chosen expert,
-  BLER per expert across SNR bins, routing share per profile. Concrete
-  "what does each expert actually do?" with data.
-- **F. Decision boundary on PCA plane** — 5-NN vote on a dense grid in PCA
-  space colors routing decision regions; samples overlaid colored by true
-  SNR. Visual proof of "router decision boundary aligns with SNR contours."
+**A. Linear probing — implicit SNR encoding is PROFILE-SPECIFIC, not universal:**
 
-Job 19586663 submitted 2026-04-30 evening. Output:
-`docs/figures/router_mechanism_{linear_probing,expert_specialization,
-decision_boundary}.png` + JSON of probe scores.
+| Probe | UMa R² | TDLC R² |
+|---|---:|---:|
+| **SNR** | 0.42 | **0.93** |
+| Channel power | 0.43 | 0.07 (Sionna normalises per-sample → low variance) |
+| Delay spread | 0.36 | 0.65 |
+| Profile classification (UMa vs TDLC) | 0.78 (combined) | |
 
-This is **the strongest single addition** to the consultation/report —
-turns "the model works" into "and here's exactly why."
+TDLC SNR R²=0.93 is the strongest result — confirms strong implicit SNR
+encoding for the harder NLOS channel where SNR cleanly determines decodability.
+UMa SNR R²=0.42 is much weaker — UMa channels are more position-dependent
+and SNR alone is a poor predictor of decodability (BLER stays at 0.72 even
+at 23 dB). The stem learned **different feature representations per profile**
+rather than a universal SNR encoder.
+
+**C. Per-expert specialization — striking BLER pattern:**
+
+Routing share per profile:
+- UMa: 49% nano / 24% small / 26% large
+- TDLC: 15% nano / 39% small / 46% large
+
+SNR distribution per chosen expert (cleaner on TDLC):
+- TDLC: nano at extreme low (-10 to -5 dB), small in middle (~0 dB), large at high (15+ dB)
+- UMa: nano dominates low, small fills middle, large skews high — but more overlap
+
+**Striking finding:** nano and small are at BLER ≈ 1.0 across ALL SNR bins
+in our per-sample analysis. Only large ever recovers BLER (~0.1 on TDLC at
+high SNR, ~0.5 on UMa at high SNR). The router's value is **compute efficiency**
+— it routes hopeless samples to nano (cheap failure) and decodable samples
+to large (only one that can decode). Channel-MSE auxiliary loss is the only
+way nano/small contribute meaningfully to gradient signal.
+
+**F. Decision boundary on PCA plane:**
+
+Routing decisions form coherent regions in PCA space (5-NN vote). Region
+boundaries roughly align with the SNR colour gradient — visual confirmation
+of A's quantitative result. Cleaner regional separation on TDLC than UMa.
+
+**Files:** `docs/figures/router_mechanism_{linear_probing,expert_specialization,
+decision_boundary}.png` + `router_mechanism_linear_probing.json`.
+
+**Refined narrative for the report:**
+- Old: "Stem encodes SNR implicitly — that's why explicit SNR proxies (exp38) were redundant."
+- New: "The stem learned profile-specific representations. Strong SNR encoding on TDLC (R²=0.93) where SNR drives BLER; weaker on UMa (R²=0.42) where SNR is a poor predictor. The router uses these profile-appropriate features for routing, explaining why routing patterns differ between profiles."
 
 ### Symmetric asym-warm sweep (in flight, hypothesis test)
 
@@ -156,20 +181,29 @@ Two new runs to test the principle:
 If both succeed → "cold-expert grows in" generalizes (publishable principle).
 If both fail → exp26's recipe is privileged (cold-LARGE specifically works).
 
-### 100k data scaling — bimodality strikes again
+### 100k data scaling — both seeds collapse, refined hypothesis is "α/data scaling"
 
 Concern raised in consultation: 50k samples might be too small. Tested at 100k.
 
-| Run | Data | Seed | Avg BLER | real_flops | Outcome |
-|---|---:|---:|---:|---:|---|
-| exp26 (50k headline) | 50k | 67 | 0.902 | 0.56 | heterogeneous ✓ |
-| **exp40 (100k retry)** | **100k** | 67 | **~0.953** | **0.465** | **collapsed ✗** |
-| exp58 (100k seed 42) | 100k | 42 | (in flight) | | testing bimodality |
+| Run | Data | α | Seed | Avg BLER | real_flops | Outcome |
+|---|---:|---:|---:|---:|---:|---|
+| Original anchor | **~250k (full HF stream)** | **1e-3** | 67 | 0.910 | 0.61 | ✓ heterogeneous |
+| exp26 (50k headline) | 50k | 2e-3 | 67 | 0.902 | 0.56 | ✓ heterogeneous |
+| exp40 (100k) | 100k | 2e-3 | 67 | ~0.953 | 0.465 | ✗ collapsed |
+| exp58 (100k retry) | 100k | 2e-3 | 42 | ~0.968 | 0.305 | ✗ collapsed |
+| **exp60 (in flight)** | **100k** | **1e-3** | **67** | (testing) | | tests α-scaling hypothesis |
 
-**More data → WORSE BLER (+5 pp).** Routing pattern matches s32 collapse
-signature. Likely the asym-warm bimodality hit at 100k scale. Awaiting exp58
-(seed 42 retry) to distinguish "bad luck" from "data scale exacerbates
-instability."
+**Both 100k runs at α=2e-3 collapsed** (Phase-1 style — heavy nano routing).
+But the **original anchor at full HF stream + α=1e-3 worked fine**. So the
+issue is NOT data scale per se — it's the **α/data ratio**. α=2e-3 was
+optimal at 50k; transferring it naively to 100k makes the FLOPs penalty
+effectively too strong → router collapses to nano early before large can
+catch up.
+
+**exp60 (100k + α=1e-3, in flight)** tests this. Predicted outcome:
+heterogeneous routing, BLER ≈ 0.91 (matching original anchor pattern). If
+correct → "α needs to be scaled inversely with data-per-epoch" is a clean
+methodological finding for the report.
 
 ### Convergence study (in flight) — 30k step extension of exp26
 
@@ -515,10 +549,11 @@ proper rigor.
 | 12 | **Per-SNR routing visualization** | ✅ done (`docs/figures/per_snr_routing_2zboo1rh.png`, exp26) |
 | 12b | **High-resolution per-SNR re-eval** (snr_bins=20) | ✅ done 2026-04-30; cleaner waterfall data for consultation slide |
 | 13 | **Channel-feature PCA-2D visualization** | ✅ done (`docs/figures/channel_feature_tsne_{uma,tdlc}.png`) — confirms implicit SNR encoding |
-| 13b | **Router mechanism analysis** (linear probing + expert specialization + decision boundary) | 🔄 in flight 2026-04-30 (job 19586663); 3 figures + JSON; quantifies stem-encodes-SNR hypothesis |
+| 13b | **Router mechanism analysis** (linear probing + expert specialization + decision boundary) | ✅ done 2026-04-30; **TDLC SNR R²=0.93 (strong), UMa SNR R²=0.42 (weak) — profile-specific encoding**; per-expert BLER reveals nano/small are pure compute optimizers (BLER≈1.0), only large decodes |
 | 14 | **Explicit SNR-input ablation** (exp38, use_input_statistics=true) | ✅ done 2026-04-29; collapsed to 100% large — implicit stem features sufficient |
-| 14b | **100k data scaling** — exp40 (s67) | ⚠️ done 2026-04-30; collapsed (likely bimodality at 100k scale) |
-| 14c | **100k retry seed=42** — exp58 | 🔄 in flight 2026-04-30; tests bimodality vs data-scale-induced instability |
+| 14b | **100k data scaling** — exp40 (s67, α=2e-3) | ✗ done 2026-04-30; collapsed (Phase-1 style, heavy nano) |
+| 14c | **100k retry seed=42** — exp58 (α=2e-3) | ✗ done 2026-04-30; ALSO collapsed → 0/2 success rate at α=2e-3 |
+| 14d | **100k + α=1e-3** — exp60 (matches original anchor's α) | 🔄 in flight 2026-04-30; tests "α/data ratio" hypothesis |
 | 15 | Doc cleanup: checkpoint_report rewrite | NOT STARTED — biggest remaining item |
 | 15b | **Defense brief (en+cz) + Jupyter presentation notebook** | ✅ done 2026-04-29/30 |
 | 15c | **Teacher feedback notes + 13-day action plan** | ✅ done 2026-04-30 (`docs/teacher_feedback_2026-04-30.md`) |
@@ -539,14 +574,17 @@ re-baselining dense at bs=512. None move the rubric.
 - 30k convergence result (depends on exp59 finishing — final headline number)
 - Symmetric sweep result (depends on exp56/57 finishing — hypothesis test)
 
-**Cluster jobs in flight as of 2026-04-30 evening (8+ jobs):**
-- 19583495 — dense_micro pretrain
-- 19586235 — O1_3p5 OOD test data generation
+**Cluster jobs in flight as of 2026-04-30 late evening:**
 - 19586392 — exp56 cold-small (symmetric sweep)
 - 19586393 — exp57 cold-nano (symmetric sweep)
-- 19586443 — exp58 100k seed=42 retry
 - 19586548 — exp59 30k convergence run
-- 19586663 — router mechanism analysis (linear probing + specialization + decision boundary)
+- 19586967 — O1 Arrow→pt conversion (queued)
+- 19587197 — exp60 100k + α=1e-3 test (queued)
+
+**Finished tonight that haven't been integrated yet:** dense_micro pretrain
+(19583495), O1_3p5 OOD test data gen (19586235 — Arrow format, awaiting
+conversion), exp58 (19586443 — collapsed), router mechanism (19586663 +
+19587043 → see results above).
 
 ## vs MEAN (van Bolderik et al., 2024)
 

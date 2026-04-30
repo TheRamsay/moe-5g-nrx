@@ -38,11 +38,10 @@ Two-step pipeline:
 
 ## Status
 
-- ✅ Export job 19583194 finished 2026-04-30 (~1h08): saved 100k samples per
-  profile to `/storage/.../moe-5g-datasets/train-100k-array3d/{uma,tdlc}`
-  (21.5 GB each).
-- ✅ Train job 19585019 (exp40, seed 67) finished 2026-04-30.
-- 🔄 Train job 19586443 (exp58, seed 42 retry) submitted to test bimodality.
+- ✅ Export job 19583194 (~1h08): 100k samples per profile to `train-100k-array3d/`
+- ✅ exp40 (s67, α=2e-3): collapsed → BLER ~0.953
+- ✅ exp58 (s42, α=2e-3 retry): also collapsed → BLER ~0.968 (real_flops 0.305)
+- 🔄 exp60 (s67, **α=1e-3** — refined hypothesis test): in flight
 
 ## Results — exp40 (DONE 2026-04-30)
 
@@ -56,27 +55,30 @@ result. Looking at the routing pattern (real_flops=0.465, ~45% FLOPs):
 **this is the s32 collapse signature** — router shifted toward nano/small,
 large under-used.
 
-## Two interpretations
+## Refined hypothesis after exp58 collapse (and remembering the original anchor)
 
-1. **Bad luck:** The asym-warm bimodality strikes again. Same recipe, different
-   data scale, hit the bad attractor. Earlier 3-seed analysis showed 1/3 seeds
-   collapse — exp40 likely hit that 1/3 outcome.
-2. **Data scale exacerbates instability:** More data could shift the loss
-   landscape in ways that make the bad attractor easier to reach.
+CLAUDE.md history shows the **original asym-warm anchor** was trained on the
+**FULL HuggingFace stream (~250k samples) with α=1e-3** and produced
+**heterogeneous routing fine** (BLER 0.910 / 61% FLOPs). So data scale alone
+isn't the issue.
 
-## Why we queued exp58 (s42 retry)
+The variable that changed is **α**:
 
-To distinguish between the two interpretations:
-- If exp58 (seed 42 at 100k) succeeds → bimodality, more data is fine on
-  average, exp40 was unlucky.
-- If exp58 also collapses → data scale really does worsen instability.
+| Run | α | Data | Result |
+|---|---:|---:|---|
+| Original anchor | **1e-3** | **~250k** | ✓ heterogeneous (0.910 BLER) |
+| exp26 headline | 2e-3 | 50k | ✓ heterogeneous (0.902 BLER) |
+| exp40 | 2e-3 | 100k | ✗ collapsed (Phase-1 style, heavy nano) |
+| exp58 | 2e-3 | 100k | ✗ collapsed (also nano-heavy, real_flops 0.305) |
+| **exp60** | **1e-3** | **100k** | **(in flight)** |
 
-Either result is informative for the writeup.
+**Refined hypothesis:** the **α/data ratio** matters, not data scale alone.
+α=2e-3 was tuned for 50k. At 100k the same α applied per sample produces a
+stronger effective FLOPs signal across the larger epoch — pushes router to
+nano too early before large can wake up.
 
-## Honest framing
-
-> "100k training also exhibited the asym-warm bimodality — landed in the
-> bad attractor. Without multiple seeds at 100k we can't distinguish 'bad
-> luck' from 'more data hurts the recipe.' To make a clean data-scaling
-> claim we'd need ≥3 seeds at 100k. Honest answer: 50k vs 100k results
-> are inconclusive due to recipe instability, not a clean answer."
+**exp60 tests this:** if α=1e-3 at 100k recovers heterogeneous routing
+matching the original anchor's BLER ~0.91 → confirms the hypothesis. Clean
+methodological finding for the writeup:
+> "The asym-warm recipe is robust to data scale provided the FLOPs penalty α
+> is scaled inversely with data-per-epoch."

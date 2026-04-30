@@ -63,8 +63,63 @@ Expect to see "the router picks experts where they actually deliver value."
 
 ## Status
 
-Job 19586663 submitted 2026-04-30 evening. Output figures + JSON in
-`docs/figures/router_mechanism_*`.
+- Job 19586663 (initial) — completed but figures saved to scratch (cleaned up)
+- Job 19587043 (re-run with persistent output path) — ✅ DONE 2026-04-30
+- Output: `docs/figures/router_mechanism_{linear_probing,expert_specialization,decision_boundary}.png` + JSON
+
+## Results
+
+### A. Linear probing — implicit SNR encoding is PROFILE-SPECIFIC
+
+| Probe | UMa R² | TDLC R² |
+|---|---:|---:|
+| **SNR** | 0.42 | **0.93** |
+| Channel power | 0.43 | 0.07 (Sionna normalises per-sample → low variance) |
+| Delay spread | 0.36 | 0.65 |
+| Profile classification (UMa vs TDLC) | 0.78 (combined) | |
+
+**Key finding:** TDLC SNR R²=0.93 confirms strong implicit SNR encoding for
+the harder NLOS channel. UMa SNR R²=0.42 is much weaker — UMa channels are
+more position-dependent and SNR alone is a poor predictor of decodability.
+The stem learned **profile-specific representations**, not a universal SNR
+encoder.
+
+### C. Per-expert specialization
+
+Routing share per profile:
+- UMa: 49% nano / 24% small / 26% large
+- TDLC: 15% nano / 39% small / 46% large
+
+SNR distribution per chosen expert (cleaner separation on TDLC):
+- TDLC: nano at extreme low (-10 to -5 dB), small in middle (~0 dB), large at high (15+ dB)
+- UMa: nano dominates low, small fills middle, large skews high — but more overlap
+
+**Striking finding:** nano and small are at BLER ≈ 1.0 across ALL SNR bins.
+Only large ever achieves BLER below 1.0 (~0.1 on TDLC at high SNR, ~0.5 on
+UMa at high SNR). The router's value is **compute efficiency** — routes
+hopeless samples to nano (cheap failure) and decodable samples to large
+(only one that can decode).
+
+### F. Decision boundary on PCA plane
+
+Routing decisions form coherent regions in PCA space (5-NN vote). Boundaries
+roughly align with the SNR colour gradient — visual confirmation of A's
+quantitative result. Cleaner regional separation on TDLC than UMa.
+
+## Implications for the writeup
+
+**Old narrative:** "Stem encodes SNR implicitly — that's why explicit SNR
+proxies (exp38) were redundant."
+
+**New, refined narrative:** "The stem learned profile-specific representations.
+Strong SNR encoding on TDLC (R²=0.93) where SNR drives BLER; weaker on UMa
+(R²=0.42) where SNR is a poor predictor. The router uses these
+profile-appropriate features for routing, explaining why routing patterns
+differ between profiles."
+
+This is a **richer story** than "stem encodes SNR" — and arguably more
+publishable because it reveals the stem learned what to encode based on what
+matters per profile, not a one-size-fits-all representation.
 
 ## Why this is the strongest single addition for the writeup
 
