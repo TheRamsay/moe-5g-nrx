@@ -1,0 +1,22 @@
+# @package _global_
+# Eval52: exp26 on 3GPP in-family OOD profiles (TDL-A, TDL-D, CDL-A).
+
+defaults:
+  - override /model: moe_nl
+  - override /dataset: mixed
+
+experiment:
+  batch_name: 3gpp-ood-eval-v1
+  exp_name: eval_exp26_3gpp_ood
+  tags: [eval, ood, 3gpp, in-family, moe, asym-warm, simo-1x4, 16qam]
+  notes: >
+    exp26 (alpha=2e-3, asym warm-start, seed 67) on TDL-A + TDL-D + CDL-A.
+    Tests in-family OOD generalization within 3GPP channel-model family.
+  study_slug: 2026-04-30-3gpp-ood-eval-v1
+  study_path: experiments/2026-04-30-3gpp-ood-test-v1
+  question: Does exp26 generalize to 3GPP channel models it wasn't trained on?
+
+evaluation:
+  profiles: [tdla, tdld, cdla]
+  snr_bins: 7
+  use_artifacts: false
