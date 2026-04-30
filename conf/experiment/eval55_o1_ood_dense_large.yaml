@@ -1,0 +1,27 @@
+# @package _global_
+# Eval55: dense_large on DeepMIMO O1_3p5. Companion to eval54 (exp26).
+
+defaults:
+  - override /model: static_dense
+  - override /dataset: mixed
+
+experiment:
+  batch_name: deepmimo-o1-ood-eval-v1
+  exp_name: eval_dense_large_o1_ood
+  tags: [eval, ood, deepmimo, o1, ray-traced, dense, baseline, simo-1x4, 16qam]
+  notes: dense_large on DeepMIMO O1_3p5 (outdoor street ray-traced). Reference for exp26.
+  study_slug: 2026-04-30-deepmimo-o1-ood-v1
+  study_path: experiments/2026-04-30-deepmimo-o1-ood-v1
+  question: Does dense_large generalize to ray-traced O1 (simpler outdoor than ASU)?
+
+model:
+  backbone:
+    stem_hidden_dims: [64, 64]
+    num_cnn_blocks: 8
+    block_hidden_dim: 64
+    readout_hidden_dim: 128
+
+evaluation:
+  profiles: [o1_3p5]
+  snr_bins: 7
+  use_artifacts: false

@@ -1,0 +1,25 @@
+# @package _global_
+# Eval54: exp26 on DeepMIMO O1_3p5 (outdoor street ray-traced, 3.5 GHz).
+# Same carrier as training. Diagnostic: is ray-traced failure ASU-specific
+# or a fundamental synthetic-vs-geometric gap?
+
+defaults:
+  - override /model: moe_nl
+  - override /dataset: mixed
+
+experiment:
+  batch_name: deepmimo-o1-ood-eval-v1
+  exp_name: eval_exp26_o1_ood
+  tags: [eval, ood, deepmimo, o1, ray-traced, moe, asym-warm, simo-1x4, 16qam]
+  notes: >
+    exp26 on DeepMIMO O1_3p5 (outdoor street, 3.5 GHz). Companion to existing
+    asu_campus1 OOD eval — tests whether the catastrophic OOD failure is
+    ASU-specific or general to all ray-traced outdoor.
+  study_slug: 2026-04-30-deepmimo-o1-ood-v1
+  study_path: experiments/2026-04-30-deepmimo-o1-ood-v1
+  question: Does exp26 generalize to ray-traced O1 (simpler outdoor than ASU)?
+
+evaluation:
+  profiles: [o1_3p5]
+  snr_bins: 7
+  use_artifacts: false
