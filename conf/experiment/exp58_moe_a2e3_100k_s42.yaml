@@ -1,0 +1,54 @@
+# @package _global_
+# Experiment 58: 100k data scaling — REPEAT with seed 42 (test bimodality).
+#
+# exp40 (seed 67, 100k samples) collapsed to a bad attractor: avg BLER 0.953
+# vs exp26's 0.902 at 50k samples. Routing pattern matched the s32 collapse
+# signature — looks like the same recipe instability we already characterized.
+#
+# This run uses seed 42 (which DID succeed at 50k as exp29) to test the
+# bimodality hypothesis at 100k:
+#   - if seed 42 succeeds at 100k → exp40 was bad luck, recipe still bimodal
+#     across seeds; "more data ~= same data" averaged across seeds
+#   - if seed 42 also collapses at 100k → data scaling makes the recipe
+#     LESS stable (worse than 50k), which would be a real finding
+#
+# All else identical to exp40 (alpha=2e-3, asym warm-start, 12k steps, 100k).
+
+defaults:
+  - override /model: moe_nl
+  - override /dataset: mixed
+
+experiment:
+  batch_name: data-scaling-100k-v1
+  exp_name: moe_a2e3_100k_s42
+  tags: [moe, data-scaling, asymmetric-warmstart, hf, simo-1x4, 16qam, nl-range, multi-seed]
+  notes: >
+    100k samples × asym warm-start × alpha=2e-3 × seed 42. Companion to exp40
+    (same recipe, seed 67, collapsed). Tests whether the 100k collapse was bad
+    luck or data-scale-induced instability.
+  study_slug: 2026-04-30-data-scaling-100k-v1
+  study_path: experiments/2026-04-30-data-scaling-100k-v1
+  question: Does seed 42 at 100k produce the heterogeneous routing exp29 had at 50k?
+
+model:
+  compute:
+    flops_penalty_alpha: 2e-3
+    load_balance_beta: 0.1
+
+training:
+  hf_dataset: Vack0/moe-5g-nrx
+  batch_size: 128
+  learning_rate: 1e-3
+  weight_decay: 1e-4
+  max_steps: 12000
+  seed: 42
+  freeze_experts: false
+  warm_start:
+    stem_checkpoint: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best"
+    experts:
+      nano: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_nano_final20k_constant_lr_s67-aos4hhid:best"
+      small: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_small_final20k_constant_lr_s67-kivdz4qu:best"
+
+validation:
+  every_n_steps: 500
+  snr_bins: 5
