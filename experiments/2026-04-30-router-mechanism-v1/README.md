@@ -106,6 +106,27 @@ Routing decisions form coherent regions in PCA space (5-NN vote). Boundaries
 roughly align with the SNR colour gradient — visual confirmation of A's
 quantitative result. Cleaner regional separation on TDLC than UMa.
 
+### Per-expert success-rate analysis (added 2026-04-30 evening, v2)
+
+Aggregate per-expert success rates on routed samples (4k per profile):
+
+| Expert | UMa success rate | TDLC success rate |
+|---|---:|---:|
+| nano | **0.00%** | **0.00%** |
+| small | **0.00%** | **0.00%** |
+| **large** | **23.21%** | **29.42%** |
+
+**Definitive answer to the "is small a sink?" question:** nano AND small
+literally never decode any block successfully. Only large delivers actual
+decoded outputs. Nano/small are pure compute optimizers — their value is:
+
+1. Compute savings on hopeless samples
+2. Channel-MSE auxiliary loss training signal
+3. Routing structure (3 cost tiers)
+
+Figure: `docs/figures/router_mechanism_success_rate.png`. Visualizes the
+flat-zero lines for nano/small and the rising large curve.
+
 ## Implications for the writeup
 
 **Old narrative:** "Stem encodes SNR implicitly — that's why explicit SNR

@@ -164,22 +164,56 @@ decision_boundary}.png` + `router_mechanism_linear_probing.json`.
 - Old: "Stem encodes SNR implicitly — that's why explicit SNR proxies (exp38) were redundant."
 - New: "The stem learned profile-specific representations. Strong SNR encoding on TDLC (R²=0.93) where SNR drives BLER; weaker on UMa (R²=0.42) where SNR is a poor predictor. The router uses these profile-appropriate features for routing, explaining why routing patterns differ between profiles."
 
-### Symmetric asym-warm sweep (in flight, hypothesis test)
+### Symmetric asym-warm sweep (DONE 2026-04-30) — refined principle
 
-Hypothesis from trajectory analysis: *"In heterogeneous-expert MoE, the
-expert with the largest initial quality lead becomes the routing attractor.
-Asymmetric initialization shifts which expert wins."*
+Tested whether "cold-expert grows in" generalizes by varying which expert is
+cold-init.
 
-Two new runs to test the principle:
+| Exp | Setup | Avg BLER | real_flops | Outcome |
+|---|---|---:|---:|---|
+| **exp26** (cold-LARGE) | warm nano+small, cold large | **0.902** | **0.56** | heterogeneous ✓ (44/15/40) |
+| **exp56** (cold-SMALL) | warm nano+large, cold small | 0.897 | 0.82 | mostly large + some nano (small never recovers) |
+| **exp57** (cold-NANO) | warm small+large, cold nano | 0.887 | **1.00** | **FULL Phase-2 collapse to large** |
 
-| Exp | Setup | Quality at step 0 | Predicted outcome |
-|---|---|---|---|
-| exp26 (existing) | warm-nano + warm-small + COLD-large | nano 0.97, small 0.91, large 0.99 random | heterogeneous ✓ (DONE) |
-| exp56 (in flight) | warm-nano + COLD-small + warm-large | nano 0.97, small 0.99 random, large 0.87 | uncertain — may collapse to large |
-| exp57 (in flight) | COLD-nano + warm-small + warm-large | nano 0.99 random, small 0.91, large 0.87 | most pessimistic — cold-nano has no capacity advantage |
+**Refined finding:** asym-warm-start works **specifically when LARGE is
+cold-init** — not just any cold expert. The mechanism: temporarily
+handicapping the highest-capacity expert forces the router to commit to
+smaller experts before large becomes competent. When OTHER experts are
+cold (exp56, exp57), warm-large still dominates from step 1, the router
+locks on large, and the cold expert never recovers.
 
-If both succeed → "cold-expert grows in" generalizes (publishable principle).
-If both fail → exp26's recipe is privileged (cold-LARGE specifically works).
+**This is a richer/stronger publishable claim than "asym-warm works":**
+exp26's recipe is *uniquely privileged* because cold-large is the only
+configuration that breaks warm-large's gradient dominance.
+
+### Per-expert success rate analysis (DONE 2026-04-30) — nano/small are ZERO%
+
+Aggregate per-expert success rates on routed samples (4k samples per profile):
+
+| Expert | UMa success rate | TDLC success rate |
+|---|---:|---:|
+| nano | **0.00%** | **0.00%** |
+| small | **0.00%** | **0.00%** |
+| **large** | **23.21%** | **29.42%** |
+
+**Nano and small literally never decode any block successfully.** Only
+large delivers actual decoded outputs. This **definitively answers** the
+"is small a sink?" question: yes — nano and small are pure compute optimizers
+that never decode. Their value is:
+
+1. **Compute savings** on hopeless samples (nano cheaper than small cheaper than large)
+2. **Channel-MSE auxiliary loss** training signal — small produces better channel estimates than nano even when bits fail, contributing to stem feature quality during training
+3. **Routing structure** — 3 cost tiers vs 2 give finer-grained adaptive compute
+
+**Reframed project contribution:** *"The compute-aware MoE doesn't have
+multiple experts that all decode in parallel. It has ONE expert that decodes
+(large) plus two experts that intelligently skip-the-compute on hopeless
+samples. The router's value is recognizing 'this is hopeless, route to cheap
+fail' vs 'this is decodable, pay for large.'"*
+
+Figure: `docs/figures/router_mechanism_success_rate.png` — visually shows
+nano/small flat at 0 while large rises from 0 at low SNR to ~0.4 (UMa)/0.9
+(TDLC) at high SNR.
 
 ### 100k data scaling — both seeds collapse, refined hypothesis is "α/data scaling"
 
@@ -539,7 +573,8 @@ proper rigor.
 | 8b | **Switch-aux loss sweep** (exp44–47, weights 1e-3..1e0) | ✅ done 2026-04-30; **all 4 collapsed** — proper sweep confirms original single-shot finding |
 | 8c | **Capacity penalty sweep** (exp48–51, weights 0.1..10) | ✅ done 2026-04-30; two failure modes — collapse OR forced routing kills BLER |
 | 8d | **Routing trajectory analysis** (W&B history → matplotlib) | ✅ done 2026-04-30; killer figures showing collapse dynamics across 11 runs |
-| 8e | **Symmetric asym-warm sweep** (exp56 cold-small, exp57 cold-nano) | 🔄 in flight 2026-04-30; tests "cold-expert grows in" generalization |
+| 8e | **Symmetric asym-warm sweep** (exp56 cold-small, exp57 cold-nano) | ✅ done 2026-04-30; **cold-LARGE is uniquely effective** — exp57 fully collapsed, exp56 mostly large. Refined principle for the writeup. |
+| 8g | **Per-expert success rate analysis** | ✅ done 2026-04-30; **nano/small NEVER decode (0%), only large does (23-29%)** — they're pure compute optimizers |
 | 8f | **30k convergence study** (exp59) | 🔄 in flight 2026-04-30; final-report headline number for exp26 recipe |
 | 9 | **Static + SNR-oracle cascade baseline** (D analysis) | ✅ done; exp26 on Pareto frontier; oracle cascade slightly better at same BLER |
 | 9b | **Classical LMMSE / Genie-MRC / single-ant baselines** | ✅ done 2026-04-30; complete classical ladder vs neural results |
