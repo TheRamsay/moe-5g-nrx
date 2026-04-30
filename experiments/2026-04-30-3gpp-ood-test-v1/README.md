@@ -59,4 +59,37 @@ profile files.
 
 ## Status
 
-Generation job 19584191 in flight. Eval submissions to follow.
+Generation job 19584191 finished 2026-04-30. Eval jobs (19585025-19585027)
+all complete.
+
+## Results — eval on TDL-A + TDL-D + CDL-A test sets (DONE 2026-04-30)
+
+| Model | TDL-A | TDL-D | CDL-A | Avg in-family OOD | Vs in-distribution avg (UMa+TDLC) |
+|---|---:|---:|---:|---:|---|
+| **LMMSE (LS-MRC)** | **0.804** | **0.801** | **0.801** | **0.802** | LMMSE on UMa+TDLC = 0.900 → 10pp BETTER on simpler channels |
+| dense_large | 0.832 | 0.822 | 0.821 | 0.825 | dense on UMa+TDLC = 0.901 → 8pp BETTER |
+| **exp26 MoE** | **0.834** | **0.824** | **0.816** | **0.825** | exp26 on UMa+TDLC = 0.902 → 8pp BETTER |
+
+**Three big findings:**
+
+1. **exp26 generalizes well within the 3GPP family** — actually BETTER BLER
+   than its training distribution because TDL-A/D and CDL-A are *simpler*
+   channels (lower delay spread, LOS components).
+2. **LMMSE classical beats both neural models by ~2-3 pp** on these in-family
+   OOD profiles. Simple channels + perfect math = classical wins. Neural's
+   advantage is in complex/noisy channels (UMa+TDLC waterfall).
+3. **exp26 ≈ dense_large** within 0.005 BLER — same neural-quality envelope,
+   exp26 wins on FLOPs.
+
+**For the consultation:** this is much richer than "synthetic-only model
+fails on real data." It's "model generalizes well within the 3GPP family;
+the catastrophic OOD failure is specific to ray-traced geometry, not
+unfamiliar channels in general."
+
+The complete generalization spectrum:
+
+```
+TRAINING (UMa+TDLC)  → IN-FAMILY OOD (TDL-A/D, CDL-A)  → FAR OOD (DeepMIMO ASU)
+  exp26: 0.902             exp26: ~0.83                  exp26: 0.992 ✗
+  ✓ trained                ✓ better than training        ✗ catastrophic failure
+```

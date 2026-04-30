@@ -83,5 +83,30 @@ Three possible patterns:
 
 ## Status
 
-8 jobs submitted (19584455–19584462) on 2026-04-30 evening. Results expected
-within 4-6h.
+8 jobs submitted (19584455–19584462) on 2026-04-30 evening.
+
+## Results — Switch aux sweep (DONE 2026-04-30)
+
+| Exp | Job | switch_aux_weight | UMa BLER | TDLC BLER | exp_flops | real_flops | Outcome |
+|---|---|---:|---:|---:|---:|---:|---|
+| exp44 | 19584455 | 1e-3 | 0.931 | 0.844 | 1.000 | **1.000** | full collapse to large |
+| exp45 | 19584456 | 1e-2 | 0.930 | 0.844 | 1.000 | **1.000** | full collapse to large |
+| exp46 | 19584457 | 1e-1 | 0.931 | 0.840 | 1.000 | **1.000** | full collapse to large |
+| exp47 | 19584458 | 1e0 | 0.937 | 0.859 | 0.544 | **0.996** | soft routing has high entropy but argmax picks large 99.6% |
+
+**Outcome 1 confirmed:** all 4 collapse. Across 4 orders of magnitude of
+weight, Switch auxiliary loss cannot prevent the Phase 2 large-collapse with
+our setup. exp47 (strongest weight=1.0) is interesting — it spreads soft
+routing probabilities (exp_flops=0.544) but at hard top-1 inference, every
+sample still picks large. The BCE gradient pulling to warm-large dominates
+at the top-1 decision boundary, even when the soft loss penalises imbalance.
+
+**Capacity sweep (exp48-51) in flight at time of writing.**
+
+## Implications
+
+For the consultation: the original "Switch aux failed" claim was based on a
+single-shot run. We now have a **proper sweep across 4 orders of magnitude**
+that confirms the result. This strengthens the asym-warm-as-only-recipe
+narrative — Switch aux fundamentally cannot fix Phase 2 collapse, regardless
+of weight tuning.

@@ -4,9 +4,155 @@
 
 Build a **compute-aware 5G neural receiver** that keeps BLER close to a dense baseline while reducing **average FLOPs** via adaptive routing. Main result: **BLER vs Average FLOPs** Pareto curve. Router uses channel-quality features from the shared stem — not raw SNR.
 
-## Current State (2026-04-27)
+## Current State (2026-04-30)
 
-**Pareto frontier (test split, all on 50k subset):**
+### Latest sprint (2026-04-30 evening — post-consultation work)
+
+After being roasted at consultation on (1) NN explanation depth, (2) lack of
+standard baseline comparison, (3) methodology rigor, we pushed a heavy batch
+of follow-up experiments tonight. Summary of new results below; details in
+following sections.
+
+**New findings since 2026-04-27 CLAUDE.md:**
+
+| # | Experiment | Key result |
+|---|---|---|
+| **Classical baselines** | LMMSE (LS-MRC), Genie-MRC, single-antenna | Single-ant 0.995 / **LS-MRC 0.900** / Genie-MRC 0.854 — neural beats classical only in waterfall, classical wins on simpler channels |
+| **3GPP in-family OOD** | exp26+dense_large+LMMSE on TDL-A/D, CDL-A | exp26 generalizes well within 3GPP family (BLER 0.82–0.83). **LMMSE beats neural by 2-3 pp on simpler profiles.** |
+| **Anti-collapse sweep** | Switch-aux at weights 1e-3..1e0 (4 runs) | **All 4 collapsed to 100% large** at hard top-1 inference. Confirms original finding rigorously. |
+| **Anti-collapse sweep** | Capacity penalty at weights 0.1..10 (4 runs) | In progress — running |
+| **No-small ablation** | exp41: drop small, keep {nano, large} | **+5.3 pp BLER cost** (avg ~0.955). **Disproves "small is just a sink" critique.** Small does real decoding work, especially on TDLC. |
+| **Smaller-small alternative** | exp42 (dense_micro pretrain, block_dim=16) → exp43 | In progress — exp42 running |
+| **100k data scaling** | exp40: same recipe as exp26, 2× training data | In progress — running |
+| **Wall-clock latency on real data** | All 4 models on same A40 GPU, real OFDM data | **exp26 is 1.67× SLOWER than dense_large** on real data due to dispatch overhead. Original 1.93× synthetic claim is misleading; FLOPs is the right metric. |
+| **High-resolution per-SNR** | eval46/47 + LMMSE at snr_bins=20 | Cleaner waterfall data for the consultation figure |
+| **PCA channel-feature viz** | (already done, now validated as the "implicit SNR encoding" evidence) | Stem features cluster monotonically by SNR on UMa — visual proof that router learned implicit SNR representation |
+| **Explicit SNR-input ablation** | exp38: feed raw signal stats to router | **Collapsed to 100% large.** Implicit stem features are sufficient — explicit raw stats are redundant + destabilising. |
+
+### Classical baselines (2026-04-30 tonight)
+
+Implemented as `src/baselines/lmmse.py` (vectorised PyTorch, no trainable params)
+and evaluated via `scripts/evaluate_lmmse.py`. Three modes form a ladder:
+
+| Baseline | UMa BLER | TDLC BLER | Avg BLER | Channel info |
+|---|---:|---:|---:|---|
+| Single-antenna detection | 0.992 | 0.998 | **0.995** | LS estimate, 1 of 4 antennas |
+| **LS-MRC (realistic classical)** | **0.939** | **0.861** | **0.900** | LS estimate + MRC across 4 antennas |
+| **Genie-MRC (oracle)** | **0.908** | **0.800** | **0.854** | True channel + MRC (NOT deployable) |
+
+**Key per-SNR comparison (TDLC waterfall 15-20 dB):**
+- LS-MRC: 0.155 BLER
+- Genie-MRC: 0.027 BLER
+- dense_large: ~0.085 BLER
+- **Channel estimation is the classical bottleneck** — LS vs Genie gap = 13 pp
+- **Neural beats LS-MRC in waterfall** (~10 pp at 14 dB) but **loses to Genie-MRC** at high SNR (with perfect channel info, classical is mathematically optimal for 16-QAM)
+
+### 3GPP in-family OOD (2026-04-30)
+
+Generated test data for TDL-A, TDL-D, CDL-A using same generator pipeline
+(`src/data/sionna_generator.py`, extended with new ChannelProfile enums).
+32k samples per profile, deterministic seed (base_seed=67 + TEST_SEED_OFFSET).
+
+| Model | TDL-A | TDL-D | CDL-A | Avg in-family OOD |
+|---|---:|---:|---:|---:|
+| **LMMSE (LS-MRC)** | **0.804** | **0.801** | **0.801** | **0.802** |
+| dense_large | 0.832 | 0.822 | 0.821 | 0.825 |
+| **exp26 MoE** | **0.834** | **0.824** | **0.816** | **0.825** |
+
+**Big finding:** exp26 generalizes really well within the 3GPP family (BLER
+~0.82, BETTER than its training BLER on TDL-C 0.867 because these profiles
+are simpler — lower delay spread, LOS components). **LMMSE classical actually
+beats both neural models on these in-family OOD profiles.** Why: simpler
+channels + perfect math = classical wins. Neural's edge is in complex/noisy
+channels.
+
+This narrows the OOD weakness from "all unfamiliar channels" to specifically
+"the synthetic-stochastic vs ray-traced-geometric gap" (DeepMIMO ASU still
+fails catastrophically; in-family 3GPP works fine).
+
+### Anti-collapse sweep — Switch aux loss (4 weights, all collapsed)
+
+Re-ran the original "Switch aux failed" claim with proper hyperparameter sweep:
+
+| Exp | switch_aux_weight | TDLC BLER | exp_flops | real_flops | Outcome |
+|---|---:|---:|---:|---:|---|
+| exp44 | 1e-3 | 0.844 | 1.000 | 1.000 | full collapse to large |
+| exp45 | 1e-2 | 0.844 | 1.000 | 1.000 | full collapse to large |
+| exp46 | 1e-1 | 0.840 | 1.000 | 1.000 | full collapse to large |
+| exp47 | 1e0 | 0.859 | 0.544 | 0.996 | soft routing has high entropy but argmax still picks large 99.6% of time |
+
+**Original "single-shot Switch aux failed" claim now properly characterized
+across 4 orders of magnitude.** No weight value prevents the Phase 2 collapse.
+Capacity sweep (exp48-51) is in progress.
+
+### Wall-clock latency — real data (corrected story)
+
+The original 2026-04-26 synthetic-input benchmark claimed 1.93× speedup.
+Re-running on **real OFDM test data** with all 4 models on the same GPU
+(NVIDIA A40):
+
+| Model | synth ms/batch | real ms/batch |
+|---|---:|---:|
+| dense_nano | 1.05 | 1.06 |
+| dense_small | 2.09 | 2.07 |
+| dense_large | 3.32 | 3.28 |
+| **exp26 MoE** | **1.93** | **5.53** |
+
+**exp26 is 1.67× SLOWER than dense_large on real data.** Dense models: real ≈
+synthetic. MoE: real >> synthetic because hard top-1 routing splits the batch
+into 3 sequential sub-batches (mask indexing + scatter overhead dominates at
+batch=64).
+
+**Claim retraction:** the 1.93× synthetic speedup does NOT translate to
+wall-clock with our naive dispatch implementation. **The Pareto frontier is
+reported in FLOPs (hardware-agnostic), NOT latency.** Production sparse-MoE
+inference (Mixtral, vLLM dispatch kernels) would be needed to convert FLOPs
+savings into wall-clock; out of scope for this work. The defense brief and
+notebook were updated to remove the 1.93× claim.
+
+### Small-expert ablations (exp41 done, exp43 in flight)
+
+Symmetric counterpart to exp31 (which dropped nano):
+
+| Run | Setup | UMa BLER | TDLC BLER | Avg BLER | vs exp26 |
+|---|---|---:|---:|---:|---|
+| exp26 | {nano, small, large} | 0.937 | 0.867 | 0.902 | reference |
+| exp31 | {small, large} (drop nano) | 0.940 | 0.878 | 0.909 | +0.7 pp |
+| **exp41** | **{nano, large}** (drop small) | **0.967** | **0.942** | **~0.955** | **+5.3 pp** |
+
+**Definitively answers the "small is just a sink" critique: NO.** Dropping
+small costs FAR more than dropping nano (5.3 pp vs 0.7 pp). Small does real
+decoding work, especially on TDLC. The 3-expert design with current sizes is
+justified by both ablations.
+
+exp42 (dense_micro pretrain at block_dim=16) + exp43 (smaller-small MoE)
+will tell us whether the small expert can be made smaller without losing
+function.
+
+### Explicit SNR-input ablation (exp38, done 2026-04-29)
+
+Added `use_input_statistics=true` to feed router 3 scalar signal-derived
+features (received_power, channel_power, channel_variance — all SNR proxies
+computable at inference). Hypothesis: explicit SNR proxies could close the
+7 pp FLOPs gap to the SNR-oracle cascade.
+
+**Result: collapsed to 100% large.** Avg BLER 0.897 (similar to dense_large)
+at 100% FLOPs (no compute savings).
+
+**Interpretation:** the implicit stem features already encode SNR-correlated
+information (confirmed by the PCA visualization that shows monotonic SNR
+gradient in stem feature space). Adding raw stats on top is redundant AND
+destabilising — the router uses the explicit signal as an "easy classifier"
+for picking large from step 1.
+
+**Connects three findings:**
+1. random-router ablation (exp30): channel features matter
+2. exp38 collapse: raw stats are redundant with stem features
+3. PCA viz: stem features encode SNR implicitly
+
+### Original Pareto frontier (unchanged)
+
+
 
 | Run | α | Avg BLER | FLOPs % | TDLC routing l/n/s | Notes |
 |---|---:|---:|---:|---|---|
@@ -189,7 +335,16 @@ Shared stem (285M FLOPs, always paid) + channel-aware router + 3 heterogeneous e
 
 **Asym warm-start (breakthrough):** stem + nano + small warm, large random init. Large must earn traffic by training up. Router discovers large at ~step 8-10k. All 3 experts active. Nano underutilised at realistic SNR (absorbs hopeless low-SNR traffic).
 
-**Anti-collapse sweep:** β=2.0 forces 33/33/33 but kills BLER; capacity constraint collapses after unfreeze; Switch aux too weak. Asym warm-start is the only approach that worked.
+**Anti-collapse sweep:** β=2.0 forces 33/33/33 but kills BLER; capacity
+constraint collapses after unfreeze; Switch aux too weak. Asym warm-start is
+the only approach that worked.
+
+**Anti-collapse sweep (proper hyperparameter version, 2026-04-30):** ran
+Switch aux loss at weights {1e-3, 1e-2, 1e-1, 1e0} — **all 4 collapsed to
+100% large at hard top-1 inference**, even when soft routing has high entropy
+(weight=1e0: exp_flops=0.544 but real_flops=0.996). Capacity penalty sweep
+{0.1, 0.5, 2.0, 10.0} in flight. Confirms original single-shot finding at
+proper rigor.
 
 ## Data
 
@@ -227,7 +382,7 @@ Shared stem (285M FLOPs, always paid) + channel-aware router + 3 heterogeneous e
 - **Always include `validation.data_dir` and `training.hf_train_data_dir`** in cluster RUN_ARGS
 - **No `gpu_mem` in qsub**
 
-## A-Grade Roadmap (updated 2026-04-26)
+## A-Grade Roadmap (updated 2026-04-30)
 
 | # | Task | Status |
 |---|---|---|
@@ -235,22 +390,44 @@ Shared stem (285M FLOPs, always paid) + channel-aware router + 3 heterogeneous e
 | 2 | **Alpha sweep (4 jobs)** — exp24..exp27 | ✅ done; exp26 (α=2e-3) is the winner |
 | 3 | **3-seed on α=2e-3** (s32, s42 alongside s67) | ✅ done; bimodal — 2 reproduce, 1 collapses |
 | 4 | **Random-feature router ablation** | ✅ done; channel-aware features ARE load-bearing (BLER craters 6.6pp without) |
-| 5 | **2-expert ablation** | ✅ done; nano earns its keep (0.7pp BLER hit + 9pp more FLOPs without) |
+| 5 | **2-expert ablation (drop nano)** — exp31 | ✅ done; nano earns its keep (0.7pp BLER hit + 9pp more FLOPs without) |
+| 5b | **2-expert ablation (drop small)** — exp41 | ✅ done 2026-04-30; +5.3pp BLER cost — disproves "small is a sink" critique |
+| 5c | **Smaller-small MoE** — exp42+exp43 | 🔄 in flight 2026-04-30; tests block_dim=16 vs 32 for "small" expert |
 | 6 | **DeepMIMO OOD eval** (asu_campus1) | ✅ done; all 3 models fail (~0.99 BLER); honest scope finding |
+| 6b | **3GPP in-family OOD** (TDL-A, TDL-D, CDL-A) | ✅ done 2026-04-30; exp26 generalizes well within 3GPP family (0.82 BLER), LMMSE actually beats neural here |
+| 6c | **DeepMIMO O1_3p5** (simpler outdoor than ASU) | 🔄 generation queued 2026-04-30; tests if ASU was specifically hard |
 | 7 | **Large-warmup stabilization** (exp32/33/34) | ✅ done; over-corrects to 100% large in 3/3 seeds (negative result) |
 | 8 | **β-warmup stabilization** (exp35/36/37) | ✅ done; mean BLER worse than baseline (negative result) |
+| 8b | **Switch-aux loss sweep** (exp44–47, weights 1e-3..1e0) | ✅ done 2026-04-30; **all 4 collapsed** — proper sweep confirms original single-shot finding |
+| 8c | **Capacity penalty sweep** (exp48–51, weights 0.1..10) | 🔄 in flight 2026-04-30 |
 | 9 | **Static + SNR-oracle cascade baseline** (D analysis) | ✅ done; exp26 on Pareto frontier; oracle cascade slightly better at same BLER |
+| 9b | **Classical LMMSE / Genie-MRC / single-ant baselines** | ✅ done 2026-04-30; complete classical ladder vs neural results |
 | 10 | **DeepMIMO few-shot fine-tune** | ✅ done; both models stuck at ~0.99 OOD BLER (negative result, no catastrophic forgetting) |
-| 11 | **Wall-clock latency benchmark (synthetic)** | ✅ done — exp26 1.93× faster than dense_large on GPU |
-| 11b | Wall-clock latency on real test data (per-profile) | ⏳ queued (19474673, 90 min walltime to survive PTX JIT) |
+| 11 | **Wall-clock latency benchmark (synthetic)** | ✅ done — exp26 1.93× faster on RTX PRO 6000 (synthetic input) |
+| 11b | **Wall-clock latency on real test data** | ✅ done 2026-04-30; **NEGATIVE: exp26 1.67× SLOWER than dense_large on real data** due to dispatch overhead. Original 1.93× claim retracted. |
 | 12 | **Per-SNR routing visualization** | ✅ done (`docs/figures/per_snr_routing_2zboo1rh.png`, exp26) |
-| 13 | **Channel-feature PCA-2D visualization** | ✅ done (`docs/figures/channel_feature_tsne_{uma,tdlc}.png`) |
-| 14 | Multi-scenario OOD (e.g. I1_2p4 indoor) | ⏸ blocked — deepmimo.net download link broken; will skip if not back soon |
-| 15 | Doc cleanup: checkpoint_report (§4 dataset, mean±std, ablations, OOD section, latency, viz figures) | not started |
+| 12b | **High-resolution per-SNR re-eval** (snr_bins=20) | ✅ done 2026-04-30; cleaner waterfall data for consultation slide |
+| 13 | **Channel-feature PCA-2D visualization** | ✅ done (`docs/figures/channel_feature_tsne_{uma,tdlc}.png`) — confirms implicit SNR encoding |
+| 14 | **Explicit SNR-input ablation** (exp38, use_input_statistics=true) | ✅ done 2026-04-29; collapsed to 100% large — implicit stem features sufficient |
+| 14b | **100k data scaling** — exp40 | 🔄 in flight 2026-04-30 (export done, training started); tests teacher's "50k might be small" concern |
+| 15 | Doc cleanup: checkpoint_report rewrite | NOT STARTED — biggest remaining item |
+| 15b | **Defense brief (en+cz) + Jupyter presentation notebook** | ✅ done 2026-04-29/30 |
+| 15c | **Teacher feedback notes + 13-day action plan** | ✅ done 2026-04-30 (`docs/teacher_feedback_2026-04-30.md`) |
+| 15d | **Experiment dir READMEs** for new 2026-04-29/30 work | ✅ done 2026-04-30 |
 | 16 | (Optional A+) MEAN reimplementation as homogeneous-expert baseline | cut — too time-expensive |
+| 17 | Poster (A2) | NOT STARTED — deadline 13 days |
 
 **Cut**: difficulty-guided routing, dataloader Arrow→torch refactor,
 re-baselining dense at bs=512. None move the rubric.
+
+**Open follow-ups (post-consultation, before final deadline ~13 days):**
+- Router interpretability beyond PCA (saliency maps, per-expert feature analysis)
+- LaTeX checkpoint report rewrite (THE biggest remaining item)
+- Poster
+- {nano, micro-small, large} eval (depends on exp43 finishing)
+- Capacity sweep results (depends on exp48-51 finishing)
+- 100k vs 50k comparison (depends on exp40 finishing)
+- O1_3p5 OOD eval (depends on data generation)
 
 ## vs MEAN (van Bolderik et al., 2024)
 

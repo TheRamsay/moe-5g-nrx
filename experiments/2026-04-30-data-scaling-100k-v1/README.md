@@ -38,5 +38,8 @@ Two-step pipeline:
 
 ## Status
 
-Export job 19583194 (in flight at time of writing). Train job to be submitted
-once export finishes.
+- ✅ Export job 19583194 finished 2026-04-30 (~1h08): saved 100k samples per
+  profile to `/storage/.../moe-5g-datasets/train-100k-array3d/{uma,tdlc}`
+  (21.5 GB each).
+- 🔄 Train job 19585019 submitted 2026-04-30, currently running.
+  ~3-5h training expected.
