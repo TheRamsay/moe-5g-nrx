@@ -1,0 +1,58 @@
+# @package _global_
+# Experiment 57: SYMMETRIC asym warm-start — COLD-nano variant.
+#
+# Tests the generalisation hypothesis (see exp56 README for context).
+#
+# Setup: warm small + warm large; nano starts random.
+# Quality at step 0: warm large (0.87) > warm small (0.91) > cold nano (~0.99 random)
+#
+# Predictions:
+#   - Router will prefer warm experts (large + small) early
+#   - Likely collapses to large (warm AND highest capacity) early
+#   - Nano may stay underutilised throughout — there's no "incentive gap"
+#     pulling traffic toward cold-nano like cold-large had
+#
+# This is the most pessimistic case for the principle: if the cold expert
+# is the SMALLEST one, it has no capacity advantage to grow into. The
+# router has zero incentive to discover it. We expect collapse to large
+# (or maybe large+small), with nano abandoned.
+
+defaults:
+  - override /model: moe_nl
+  - override /dataset: mixed
+
+experiment:
+  batch_name: asym-warm-symmetric-sweep-v1
+  exp_name: asym_coldnano_a2e3_s67
+  tags: [moe, asym-warm-symmetric, cold-nano, alpha-sweep, hf, simo-1x4, 16qam, nl-range]
+  notes: >
+    Symmetric counterpart to exp26 with cold-NANO instead of cold-large.
+    Tests the most pessimistic case: the cold expert is the smallest, no
+    capacity advantage to grow into.
+  study_slug: 2026-04-30-asym-warm-symmetric-sweep-v1
+  study_path: experiments/2026-04-30-asym-warm-symmetric-sweep-v1
+  question: Does cold-nano survive training or get permanently abandoned?
+
+model:
+  compute:
+    flops_penalty_alpha: 2e-3
+    load_balance_beta: 0.1
+
+training:
+  hf_dataset: Vack0/moe-5g-nrx
+  batch_size: 128
+  learning_rate: 1e-3
+  weight_decay: 1e-4
+  max_steps: 12000
+  seed: 67
+  freeze_experts: false
+  warm_start:
+    stem_checkpoint: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best"
+    experts:
+      small: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_small_final20k_constant_lr_s67-kivdz4qu:best"
+      large: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best"
+      # nano: omitted → random init
+
+validation:
+  every_n_steps: 500
+  snr_bins: 5
