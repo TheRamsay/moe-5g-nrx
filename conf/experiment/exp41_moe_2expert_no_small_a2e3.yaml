@@ -1,0 +1,61 @@
+# @package _global_
+# Experiment 41: 2-expert ablation — drop SMALL (symmetric counterpart to exp31).
+#
+# exp31 dropped nano and showed BLER got worse — proving nano is non-redundant.
+# This experiment drops SMALL instead, to test the symmetric question:
+# does small contribute meaningfully or could nano + large alone cover the
+# routing pattern?
+#
+#   - if avg BLER ≈ exp26 → small was redundant; the 2-expert {nano, large}
+#     setup is sufficient and our small is "wasted compute"
+#   - if avg BLER worse → small does real decoding work (especially on UMa
+#     where it's the dominant expert across all SNR bins)
+
+defaults:
+  - override /model: moe_nl
+  - override /dataset: mixed
+
+experiment:
+  batch_name: moe-ablation-no-small-v1
+  exp_name: moe_ablation_no_small_a2e3_s67
+  tags: [moe, ablation, two-expert, no-small, asym-warm, hf, simo-1x4, 16qam, nl-range]
+  notes: >
+    Drop small, keep {nano, large}. Symmetric to exp31. Tests whether small
+    is redundant given the asym-warm recipe. Same alpha=2e-3, seed=67.
+  study_slug: 2026-04-30-moe-ablation-no-small-v1
+  study_path: experiments/2026-04-30-moe-ablation-no-small-v1
+  question: Is small redundant given {nano, large}, or does it do real work?
+
+model:
+  experts:
+    nano:
+      num_cnn_blocks: 4
+      block_hidden_dim: 8
+      readout_hidden_dim: 32
+    small: null  # drop small
+    large:
+      num_cnn_blocks: 8
+      block_hidden_dim: 64
+      readout_hidden_dim: 128
+  compute:
+    flops_penalty_alpha: 2e-3
+    load_balance_beta: 0.1
+
+training:
+  hf_dataset: Vack0/moe-5g-nrx
+  batch_size: 128
+  learning_rate: 1e-3
+  weight_decay: 1e-4
+  max_steps: 12000
+  seed: 67
+  freeze_experts: false
+  warm_start:
+    stem_checkpoint: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best"
+    experts:
+      nano: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_nano_final20k_constant_lr_s67-aos4hhid:best"
+      # large: random init (asym warm)
+      # small: dropped entirely
+
+validation:
+  every_n_steps: 500
+  snr_bins: 5

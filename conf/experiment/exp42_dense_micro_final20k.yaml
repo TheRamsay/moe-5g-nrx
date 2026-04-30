@@ -1,0 +1,30 @@
+# @package _global_
+# Experiment 42: Dense Micro pretraining (block_dim=16, 8 blocks).
+# Smaller alternative to dense_small for the {nano, micro_small, large} MoE
+# ablation (exp43). Same training recipe as nano/small/large baselines.
+
+defaults:
+  - override /model: static_dense
+  - override /dataset: mixed
+
+experiment:
+  batch_name: dense-micro-finalization-v1
+  exp_name: dense_micro_final20k_constant_lr_s67
+  tags: [baseline, dense, capacity, synthetic, simo-1x4, 16qam, micro]
+  notes: >
+    Dense micro: block_dim=16, blocks=8 — between nano (8) and small (32).
+    Used as warm-start for the {nano, micro_small, large} MoE ablation that
+    tests whether a smaller "small" suffices.
+  study_slug: 2026-04-30-dense-micro-finalization-v1
+  study_path: experiments/2026-04-30-dense-micro-finalization-v1
+  question: Pretrain a smaller dense baseline to use as warm-start for the smaller-small MoE.
+
+model:
+  backbone:
+    stem_hidden_dims: [64, 64]
+    num_cnn_blocks: 8
+    block_hidden_dim: 16
+    readout_hidden_dim: 64
+
+training:
+  max_steps: 20000

@@ -1,0 +1,67 @@
+# @package _global_
+# Experiment 43: MoE with {nano, MICRO-small, large} — smaller-small ablation.
+#
+# Tests whether a much smaller "small" expert (block_dim=16 instead of 32)
+# suffices for the routing patterns we see in exp26.
+#
+# Same asym warm-start recipe + same alpha=2e-3 + same seed as exp26.
+# Difference: micro_small is block_dim=16 (vs small at 32), warm-started from
+# the new dense_micro checkpoint trained in exp42.
+#
+# Outcome interpretation:
+#   - if avg BLER ≈ exp26 → small was overkill, micro suffices, FLOPs further down
+#   - if avg BLER worse → small's capacity was load-bearing for waterfall samples
+
+defaults:
+  - override /model: moe_nl
+  - override /dataset: mixed
+
+experiment:
+  batch_name: moe-micro-small-v1
+  exp_name: moe_micro_small_a2e3_s67
+  tags: [moe, ablation, micro-small, asym-warm, hf, simo-1x4, 16qam, nl-range]
+  notes: >
+    MoE with smaller-small (block_dim=16). Same exp26 recipe, just micro_small
+    replacing small. Tests whether small was overkill.
+  study_slug: 2026-04-30-moe-micro-small-v1
+  study_path: experiments/2026-04-30-moe-micro-small-v1
+  question: Does a much smaller "small" expert (block_dim=16) match exp26 BLER?
+
+model:
+  experts:
+    nano:
+      num_cnn_blocks: 4
+      block_hidden_dim: 8
+      readout_hidden_dim: 32
+    small:
+      # "micro-small": block_dim 16 instead of 32, otherwise same shape
+      num_cnn_blocks: 8
+      block_hidden_dim: 16
+      readout_hidden_dim: 64
+    large:
+      num_cnn_blocks: 8
+      block_hidden_dim: 64
+      readout_hidden_dim: 128
+  compute:
+    flops_penalty_alpha: 2e-3
+    load_balance_beta: 0.1
+
+training:
+  hf_dataset: Vack0/moe-5g-nrx
+  batch_size: 128
+  learning_rate: 1e-3
+  weight_decay: 1e-4
+  max_steps: 12000
+  seed: 67
+  freeze_experts: false
+  warm_start:
+    stem_checkpoint: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best"
+    experts:
+      nano: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_nano_final20k_constant_lr_s67-aos4hhid:best"
+      # IMPORTANT: this artifact ref needs updating once exp42 (dense_micro pretraining) finishes.
+      small: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_micro_final20k_constant_lr_s67:best"
+      # large: random init (asym warm)
+
+validation:
+  every_n_steps: 500
+  snr_bins: 5
