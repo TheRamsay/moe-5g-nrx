@@ -1,0 +1,52 @@
+# @package _global_
+# Experiment 59: 30k convergence run — exp26 recipe extended.
+#
+# All ablations and sweeps are at 12k steps for fair A/B comparison. This
+# run trains the winning configuration (alpha=2e-3, asym warm-start, seed
+# 67) for 30k steps to characterize convergence behavior and produce the
+# final-report headline number.
+#
+# Hypothesis: BLER will improve by ~1-2 pp from 12k → 30k. Existing 20k
+# extension showed TDLC dropping from 0.867 (12k) → 0.851 (16k).
+#
+# Validation logged every 500 steps so we can plot BLER-vs-step convergence.
+
+defaults:
+  - override /model: moe_nl
+  - override /dataset: mixed
+
+experiment:
+  batch_name: convergence-study-v1
+  exp_name: moe_a2e3_30k_s67_convergence
+  tags: [moe, convergence, asymmetric-warmstart, hf, simo-1x4, 16qam, nl-range, headline]
+  notes: >
+    30k convergence run of exp26 recipe. Final-report headline number;
+    12k results used for ablation A/B comparisons. Track BLER-vs-step
+    plateau, routing stability over the longer training.
+  study_slug: 2026-04-30-convergence-study-v1
+  study_path: experiments/2026-04-30-convergence-study-v1
+  question: How much does the exp26 recipe improve from 12k → 30k steps?
+
+model:
+  compute:
+    flops_penalty_alpha: 2e-3
+    load_balance_beta: 0.1
+
+training:
+  hf_dataset: Vack0/moe-5g-nrx
+  batch_size: 128
+  learning_rate: 1e-3
+  weight_decay: 1e-4
+  max_steps: 30000
+  seed: 67
+  freeze_experts: false
+  warm_start:
+    stem_checkpoint: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best"
+    experts:
+      nano: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_nano_final20k_constant_lr_s67-aos4hhid:best"
+      small: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_small_final20k_constant_lr_s67-kivdz4qu:best"
+      # large: random init (asym warm)
+
+validation:
+  every_n_steps: 500
+  snr_bins: 5
