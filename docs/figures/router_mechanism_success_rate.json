@@ -1,0 +1,44 @@
+[
+  {
+    "profile": "uma",
+    "expert": "nano",
+    "n_samples": 1974,
+    "agg_success_rate_pct": 0.0,
+    "agg_bler": 1.0
+  },
+  {
+    "profile": "uma",
+    "expert": "small",
+    "n_samples": 979,
+    "agg_success_rate_pct": 0.0,
+    "agg_bler": 1.0
+  },
+  {
+    "profile": "uma",
+    "expert": "large",
+    "n_samples": 1047,
+    "agg_success_rate_pct": 23.209,
+    "agg_bler": 0.7679
+  },
+  {
+    "profile": "tdlc",
+    "expert": "nano",
+    "n_samples": 609,
+    "agg_success_rate_pct": 0.0,
+    "agg_bler": 1.0
+  },
+  {
+    "profile": "tdlc",
+    "expert": "small",
+    "n_samples": 1559,
+    "agg_success_rate_pct": 0.0,
+    "agg_bler": 1.0
+  },
+  {
+    "profile": "tdlc",
+    "expert": "large",
+    "n_samples": 1832,
+    "agg_success_rate_pct": 29.421,
+    "agg_bler": 0.7058
+  }
+]
