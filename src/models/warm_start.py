@@ -67,13 +67,25 @@ def load_warm_start(
     for name, source in expert_checkpoints.items():
         if name not in moe_model.experts:
             raise ValueError(f"Expert {name!r} not found in model. " f"Available: {list(moe_model.experts.keys())}")
+        # Function-specialized experts may have a subset of {backbone, readout_llrs,
+        # readout_channel} — e.g. channel_only has no readout_llrs, sink has nothing.
+        # Filter the dense checkpoint to only keys present in the target expert,
+        # then load with strict=False so warm-start works across architecture variants.
         state = _load_state_dict(source, device=device)
         expert_weights = {
             k: v for k, v in state.items() if k.startswith(("backbone.", "readout_llrs.", "readout_channel."))
         }
-        missing, unexpected = moe_model.experts[name].load_state_dict(expert_weights, strict=True)
-        if missing or unexpected:
-            raise RuntimeError(f"Expert {name!r} weight mismatch — missing={missing}, unexpected={unexpected}")
-        print(f"[warm-start] expert {name!r} loaded from {source}")
+        target_keys = set(moe_model.experts[name].state_dict().keys())
+        if target_keys:
+            expert_weights = {k: v for k, v in expert_weights.items() if k in target_keys}
+        if not expert_weights:
+            print(f"[warm-start] expert {name!r}: no matching keys in checkpoint, skipping")
+            continue
+        missing, unexpected = moe_model.experts[name].load_state_dict(expert_weights, strict=False)
+        if unexpected:
+            raise RuntimeError(f"Expert {name!r} unexpected keys after filter: {unexpected}")
+        skipped = [k for k in target_keys if k not in expert_weights]
+        suffix = f" (skipped {len(skipped)} non-matching keys)" if skipped else ""
+        print(f"[warm-start] expert {name!r} loaded from {source}{suffix}")
 
     print(f"[warm-start] complete — stem + experts ({', '.join(expert_checkpoints)}) ready")

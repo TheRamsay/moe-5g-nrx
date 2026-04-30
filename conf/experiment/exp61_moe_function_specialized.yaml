@@ -1,0 +1,73 @@
+# @package _global_
+# Experiment 61: Function-specialized MoE — sink + channel_only + decoder.
+#
+# Motivated by the per-expert success-rate analysis showing nano AND small
+# achieve 0% successful decoding on routed samples — only large decodes
+# (23-29% success rate). Nano/small are pure compute optimizers.
+#
+# Architecture:
+#   - sink         : zero parameters; outputs zeros for bits + channel.
+#                    For samples where decoding is hopeless anyway. Saves
+#                    100% of expert FLOPs (only stem cost remains).
+#   - channel_only : backbone + channel readout only (no bit-LLR head).
+#                    For samples where channel is learnable but bits aren't —
+#                    still contributes channel-MSE auxiliary signal.
+#   - large        : full decoder (unchanged from exp26 winner).
+#
+# Recipe: same alpha=2e-3, asym warm-start (warm channel_only from
+# dense_small, cold large), seed 67. Tests whether the function-specialized
+# architecture maintains BLER while reducing total compute.
+
+defaults:
+  - override /model: moe_nl
+  - override /dataset: mixed
+
+experiment:
+  batch_name: function-specialized-moe-v1
+  exp_name: moe_function_specialized_a2e3_s67
+  tags: [moe, function-specialized, sink-expert, channel-only, asym-warm, hf, simo-1x4, 16qam]
+  notes: >
+    Function-specialized MoE: sink (no decoder) + channel_only (no bit head)
+    + large (full). Direct response to per-expert success-rate finding —
+    nano/small never decode, so why give them decoder heads? Saves the
+    bit-readout cost on every routed nano/small sample.
+  study_slug: 2026-05-01-function-specialized-moe-v1
+  study_path: experiments/2026-05-01-function-specialized-moe-v1
+  question: Can sink+channel_only+large match exp26's BLER at lower compute?
+
+model:
+  experts:
+    sink:
+      type: sink
+    channel_only:
+      type: channel_only
+      num_cnn_blocks: 8
+      block_hidden_dim: 32
+      readout_hidden_dim: 96
+    large:
+      type: decoder
+      num_cnn_blocks: 8
+      block_hidden_dim: 64
+      readout_hidden_dim: 128
+  compute:
+    flops_penalty_alpha: 2e-3
+    load_balance_beta: 0.1
+
+training:
+  hf_dataset: Vack0/moe-5g-nrx
+  batch_size: 128
+  learning_rate: 1e-3
+  weight_decay: 1e-4
+  max_steps: 12000
+  seed: 67
+  freeze_experts: false
+  warm_start:
+    stem_checkpoint: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best"
+    experts:
+      # sink: no warm-start (no params)
+      channel_only: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_small_final20k_constant_lr_s67-kivdz4qu:best"
+      # large: random init (asym warm)
+
+validation:
+  every_n_steps: 500
+  snr_bins: 5

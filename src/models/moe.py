@@ -50,6 +50,98 @@ class _ExpertHead(nn.Module):
         return logits, channel_estimate
 
 
+class _SinkExpert(nn.Module):
+    """Function-specialized sink expert: zero parameters, returns zeros for both
+    bit logits and channel estimate. Used for samples where decoding is hopeless
+    anyway — saves all expert compute (only the always-paid stem cost remains).
+
+    Maintains the same (logits, channel_estimate) interface as _ExpertHead so
+    it composes with the existing routing/dispatch code.
+    """
+
+    def __init__(
+        self,
+        *,
+        bits_per_symbol: int,
+        num_rx_antennas: int,
+        num_subcarriers: int,
+        num_ofdm_symbols: int,
+    ) -> None:
+        super().__init__()
+        self.bits_per_symbol = bits_per_symbol
+        self.num_rx_antennas = num_rx_antennas
+        self.num_subcarriers = num_subcarriers
+        self.num_ofdm_symbols = num_ofdm_symbols
+
+    def forward(self, state: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        batch_size = state.shape[0]
+        device = state.device
+        dtype = state.dtype
+        logits = torch.zeros(
+            batch_size, self.bits_per_symbol, self.num_subcarriers, self.num_ofdm_symbols, device=device, dtype=dtype
+        )
+        channel_estimate = torch.zeros(
+            batch_size,
+            2 * self.num_rx_antennas,
+            self.num_subcarriers,
+            self.num_ofdm_symbols,
+            device=device,
+            dtype=dtype,
+        )
+        return logits, channel_estimate
+
+
+class _ChannelOnlyExpert(nn.Module):
+    """Function-specialized channel-estimator expert: backbone + channel readout
+    only (no bit-LLR head). Outputs zero bit logits but a real channel estimate.
+
+    For samples where the channel is learnable but the bits are not, this saves
+    the cost of the bit-readout head while still contributing to the auxiliary
+    channel-MSE loss (the gradient signal that nano/small were really providing).
+    """
+
+    def __init__(
+        self,
+        *,
+        state_dim: int,
+        num_cnn_blocks: int,
+        block_hidden_dim: int,
+        readout_hidden_dim: int,
+        activation: str,
+        bits_per_symbol: int,
+        num_rx_antennas: int,
+        num_subcarriers: int,
+        num_ofdm_symbols: int,
+    ) -> None:
+        super().__init__()
+        self.backbone = nn.Sequential(
+            *[ResidualBottleneckBlock(state_dim, block_hidden_dim, activation) for _ in range(num_cnn_blocks)]
+        )
+        self.readout_channel = nn.Sequential(
+            nn.Conv2d(state_dim, readout_hidden_dim, kernel_size=1),
+            _activation(activation),
+            nn.Conv2d(readout_hidden_dim, 2 * num_rx_antennas, kernel_size=1),
+        )
+        self.bits_per_symbol = bits_per_symbol
+        self.num_subcarriers = num_subcarriers
+        self.num_ofdm_symbols = num_ofdm_symbols
+
+    def forward(self, state: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        state = self.backbone(state)
+        channel_estimate = self.readout_channel(state)
+        # No bit-decoder head — output zeros, max BCE loss for routed samples
+        batch_size = state.shape[0]
+        logits = torch.zeros(
+            batch_size,
+            self.bits_per_symbol,
+            self.num_subcarriers,
+            self.num_ofdm_symbols,
+            device=state.device,
+            dtype=state.dtype,
+        )
+        return logits, channel_estimate
+
+
 class MoENRX(nn.Module):
     """Shared-stem, channel-aware MoE neural receiver."""
 
@@ -124,23 +216,47 @@ class MoENRX(nn.Module):
         )
 
         self.expert_names = list(experts_config.keys())
-        self.experts = nn.ModuleDict(
-            OrderedDict(
-                (
-                    name,
-                    _ExpertHead(
-                        state_dim=state_dim,
-                        num_cnn_blocks=int(config.get("num_cnn_blocks", 8)),
-                        block_hidden_dim=int(config["block_hidden_dim"]),
-                        readout_hidden_dim=int(config["readout_hidden_dim"]),
-                        activation=activation,
-                        bits_per_symbol=bits_per_symbol,
-                        num_rx_antennas=num_rx_antennas,
-                    ),
+        # Function-specialized expert dispatch via optional `type` field:
+        #   "decoder" (default) — full _ExpertHead with bit + channel readouts
+        #   "channel_only"      — _ChannelOnlyExpert (channel head only, no bit head)
+        #   "sink"              — _SinkExpert (zero parameters, returns zeros)
+        # Expert types interoperate: each returns (logits, channel_estimate) of the
+        # same shape, so the routing/dispatch code is unchanged.
+        self.expert_types: dict[str, str] = {}
+        experts_dict: dict[str, nn.Module] = {}
+        for name, config in experts_config.items():
+            etype = str(config.get("type", "decoder")).lower()
+            self.expert_types[name] = etype
+            if etype == "sink":
+                experts_dict[name] = _SinkExpert(
+                    bits_per_symbol=bits_per_symbol,
+                    num_rx_antennas=num_rx_antennas,
+                    num_subcarriers=num_subcarriers,
+                    num_ofdm_symbols=num_ofdm_symbols,
                 )
-                for name, config in experts_config.items()
-            )
-        )
+            elif etype == "channel_only":
+                experts_dict[name] = _ChannelOnlyExpert(
+                    state_dim=state_dim,
+                    num_cnn_blocks=int(config.get("num_cnn_blocks", 8)),
+                    block_hidden_dim=int(config["block_hidden_dim"]),
+                    readout_hidden_dim=int(config["readout_hidden_dim"]),
+                    activation=activation,
+                    bits_per_symbol=bits_per_symbol,
+                    num_rx_antennas=num_rx_antennas,
+                    num_subcarriers=num_subcarriers,
+                    num_ofdm_symbols=num_ofdm_symbols,
+                )
+            else:  # default: decoder
+                experts_dict[name] = _ExpertHead(
+                    state_dim=state_dim,
+                    num_cnn_blocks=int(config.get("num_cnn_blocks", 8)),
+                    block_hidden_dim=int(config["block_hidden_dim"]),
+                    readout_hidden_dim=int(config["readout_hidden_dim"]),
+                    activation=activation,
+                    bits_per_symbol=bits_per_symbol,
+                    num_rx_antennas=num_rx_antennas,
+                )
+        self.experts = nn.ModuleDict(OrderedDict((n, experts_dict[n]) for n in self.expert_names))
 
         self.register_buffer(
             "pilot_distance_features",
@@ -332,6 +448,11 @@ class MoENRX(nn.Module):
     def _estimate_expert_flops(self, experts_config: dict[str, Any]) -> list[float]:
         expert_flops: list[float] = []
         for config in experts_config.values():
+            etype = str(config.get("type", "decoder")).lower()
+            if etype == "sink":
+                # Sink expert has zero parameters → zero compute beyond stem.
+                expert_flops.append(0.0)
+                continue
             num_cnn_blocks = int(config.get("num_cnn_blocks", 8))
             block_hidden_dim = int(config["block_hidden_dim"])
             readout_hidden_dim = int(config["readout_hidden_dim"])
@@ -365,24 +486,27 @@ class MoENRX(nn.Module):
                     )
                 )
 
-            flops += conv2d_flops(
-                Conv2DShape(
-                    in_channels=self.state_dim,
-                    out_channels=readout_hidden_dim,
-                    kernel_size=1,
-                    height=self.num_subcarriers,
-                    width=self.num_ofdm_symbols,
+            # Bit-LLR readout — only for decoder experts (channel-only skips this)
+            if etype != "channel_only":
+                flops += conv2d_flops(
+                    Conv2DShape(
+                        in_channels=self.state_dim,
+                        out_channels=readout_hidden_dim,
+                        kernel_size=1,
+                        height=self.num_subcarriers,
+                        width=self.num_ofdm_symbols,
+                    )
                 )
-            )
-            flops += conv2d_flops(
-                Conv2DShape(
-                    in_channels=readout_hidden_dim,
-                    out_channels=self.bits_per_symbol,
-                    kernel_size=1,
-                    height=self.num_subcarriers,
-                    width=self.num_ofdm_symbols,
+                flops += conv2d_flops(
+                    Conv2DShape(
+                        in_channels=readout_hidden_dim,
+                        out_channels=self.bits_per_symbol,
+                        kernel_size=1,
+                        height=self.num_subcarriers,
+                        width=self.num_ofdm_symbols,
+                    )
                 )
-            )
+            # Channel readout — for both decoder and channel_only experts
             flops += conv2d_flops(
                 Conv2DShape(
                     in_channels=self.state_dim,
