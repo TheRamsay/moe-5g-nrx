@@ -367,6 +367,91 @@ def decision_boundary(data_uma: dict, data_tdlc: dict, out_dir: Path):
     plt.close(fig)
 
 
+def expert_success_rate(data_uma: dict, data_tdlc: dict, out_dir: Path):
+    """Per-expert success rate (block_err == 0) per fine SNR bin + summary table.
+
+    Answers: "how often does each expert actually succeed on the samples it gets?"
+    Resolves the apparent paradox of small showing BLER=1.0 across all bins yet
+    being non-redundant per the exp41 ablation.
+    """
+    print("[D] Per-expert success-rate analysis...", file=sys.stderr)
+
+    summary_rows: list[dict] = []
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5.5))
+    for ax, (prof, d) in zip(axes, [("uma", data_uma), ("tdlc", data_tdlc)]):
+        snr_min, snr_max = d["snr_db"].min(), d["snr_db"].max()
+        # finer bins than the standard 7 — 14 bins gives ~2 dB resolution
+        bins = np.linspace(snr_min, snr_max, 15)
+        for e in (0, 1, 2):
+            mask = d["experts"] == e
+            if mask.sum() == 0:
+                continue
+            success_rate = []
+            bin_centers = []
+            n_per_bin = []
+            for i in range(len(bins) - 1):
+                bm = mask & (d["snr_db"] >= bins[i]) & (d["snr_db"] < bins[i + 1])
+                n = int(bm.sum())
+                if n < 3:
+                    continue
+                # success_rate = fraction of block_err == 0 (i.e. all bits correct)
+                sr = 1.0 - d["block_err"][bm].mean()
+                success_rate.append(sr)
+                bin_centers.append((bins[i] + bins[i + 1]) / 2)
+                n_per_bin.append(n)
+            ax.plot(
+                bin_centers,
+                success_rate,
+                "o-",
+                color=EXPERT_COLORS[EXPERT_NAMES[e]],
+                label=f"{EXPERT_NAMES[e]} (n={mask.sum()})",
+                linewidth=2,
+                markersize=6,
+            )
+            # Aggregate success-rate (mean across all samples this expert got)
+            agg_sr = float(1.0 - d["block_err"][mask].mean())
+            summary_rows.append(
+                {
+                    "profile": prof,
+                    "expert": EXPERT_NAMES[e],
+                    "n_samples": int(mask.sum()),
+                    "agg_success_rate_pct": round(100 * agg_sr, 3),
+                    "agg_bler": round(1.0 - agg_sr, 4),
+                }
+            )
+        ax.set_title(f"{prof.upper()}: per-expert SUCCESS RATE per SNR bin (zoomed Y)")
+        ax.set_xlabel("SNR (dB)")
+        ax.set_ylabel("Success rate (fraction of fully-correct blocks)")
+        # zoom Y axis aggressively so even 1-5% successes are visible
+        ax.set_yscale("symlog", linthresh=0.01)
+        ax.set_ylim(0, 1.05)
+        ax.legend(loc="upper left", fontsize=9)
+        ax.grid(True, alpha=0.25)
+
+    fig.suptitle(
+        "Per-expert SUCCESS RATE — does small ever decode? (linear log scale to surface low rates)",
+        fontsize=13,
+        y=1.02,
+        fontweight="bold",
+    )
+    plt.tight_layout()
+    out_path = out_dir / "router_mechanism_success_rate.png"
+    fig.savefig(out_path, dpi=140, bbox_inches="tight")
+    print(f"[D] wrote {out_path}", file=sys.stderr)
+    plt.close(fig)
+
+    # Save aggregate table as JSON for easy reference
+    summary_path = out_dir / "router_mechanism_success_rate.json"
+    summary_path.write_text(json.dumps(summary_rows, indent=2))
+    print("[D] aggregate per-expert success rates:", file=sys.stderr)
+    for row in summary_rows:
+        print(
+            f"  {row['profile']}/{row['expert']}: n={row['n_samples']:5d}, "
+            f"success_rate={row['agg_success_rate_pct']:.2f}%",
+            file=sys.stderr,
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -408,7 +493,8 @@ def main() -> int:
 
     expert_specialization(data_uma, data_tdlc, args.out)
     decision_boundary(data_uma, data_tdlc, args.out)
-    print("\n[DONE] All three analyses complete. Figures in docs/figures/.", file=sys.stderr)
+    expert_success_rate(data_uma, data_tdlc, args.out)
+    print("\n[DONE] All four analyses complete. Figures in docs/figures/.", file=sys.stderr)
     return 0
 
 
