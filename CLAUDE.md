@@ -4,7 +4,7 @@
 
 Build a **compute-aware 5G neural receiver** that keeps BLER close to a dense baseline while reducing **average FLOPs** via adaptive routing. Main result: **BLER vs Average FLOPs** Pareto curve. Router uses channel-quality features from the shared stem — not raw SNR.
 
-## Current State (2026-04-26)
+## Current State (2026-04-27)
 
 **Pareto frontier (test split, all on 50k subset):**
 
@@ -103,11 +103,29 @@ theoretical 1.78× because at hard top-1 only the selected expert runs and
 kernel-launch overhead favors the smaller experts. Caveat: synthetic input →
 router argmax approximately uniform 33/33/33. Real-data per-profile timing in flight.
 
-**DeepMIMO few-shot OOD fine-tune (in flight, 2026-04-26 evening):**
-Stages 1+2 done — gen `dataset-train-asu_campus1` (2048 samples, `y1o9guf5`),
-fine-tune dense_large (500 steps, lr=1e-4, `go74dlm7`) + exp26 (`9t2wyyus`).
-Stage 3 OOD evals queued (`:best` alias not saved by short fine-tune; using
-`:latest`). Will report few-shot recovery vs zero-shot 0.99 BLER.
+**DeepMIMO few-shot OOD fine-tune (DONE 2026-04-27):** Generated 2,048 ASU samples
+(`y1o9guf5`), fine-tuned dense_large 500 steps lr=1e-4 (`go74dlm7`) + exp26
+(`9t2wyyus`), then re-eval'd on uma+tdlc+asu_campus1.
+
+| Model | OOD BLER zero-shot | OOD BLER post-FT | Δ | In-dist preserved? |
+|---|---:|---:|---:|---|
+| dense_large | 0.990 | 0.9901 (`t4yo37am`) | +0.0001 | ✓ unchanged |
+| **exp26 MoE** | 0.992 | **0.9915** (`kjc12s5p`) | −0.0005 | ✓ identical, routing unchanged |
+
+**Honest negative result:** 500 steps / 2k samples insufficient to recover OOD
+performance on either model. Both stay at ~0.99 BLER on ray-traced channels.
+**No catastrophic forgetting** — ft_exp26 in-dist (UMA 0.937 / TDLC 0.867) and
+routing (44/15/40 on TDLC) are bit-identical to zero-shot exp26.
+ft_exp26 OOD routing: 75/14/11 (n/s/l) — fine-tune did NOT teach router to
+escalate to large for OOD samples; nano-default behavior preserved.
+
+> "Substantial OOD generalization requires longer fine-tune, larger OOD slice,
+> or domain-randomized pretraining — out of scope for this work."
+
+**Cluster ops note:** 4 cluster jobs needed for ft_exp26 OOD eval — wandb-init
+port flake hit 3× consecutively, then `WANDB_MODE=offline/disabled` blocked
+artifact downloads. Final fix: full clean of 207 GB `.cache/wandb` (filling home
+quota), then plain online resubmit (`19497967`) succeeded.
 
 **Channel-feature PCA-2D viz (done 2026-04-26):** stem features colored by
 router's selected expert + by true SNR. Figures at
@@ -222,7 +240,7 @@ Shared stem (285M FLOPs, always paid) + channel-aware router + 3 heterogeneous e
 | 7 | **Large-warmup stabilization** (exp32/33/34) | ✅ done; over-corrects to 100% large in 3/3 seeds (negative result) |
 | 8 | **β-warmup stabilization** (exp35/36/37) | ✅ done; mean BLER worse than baseline (negative result) |
 | 9 | **Static + SNR-oracle cascade baseline** (D analysis) | ✅ done; exp26 on Pareto frontier; oracle cascade slightly better at same BLER |
-| 10 | **DeepMIMO few-shot fine-tune** | Stages 1+2 ✅ done (`go74dlm7` dense, `9t2wyyus` exp26); Stage 3 OOD eval ⏳ queued (19474672/19474935 with `:latest`) |
+| 10 | **DeepMIMO few-shot fine-tune** | ✅ done; both models stuck at ~0.99 OOD BLER (negative result, no catastrophic forgetting) |
 | 11 | **Wall-clock latency benchmark (synthetic)** | ✅ done — exp26 1.93× faster than dense_large on GPU |
 | 11b | Wall-clock latency on real test data (per-profile) | ⏳ queued (19474673, 90 min walltime to survive PTX JIT) |
 | 12 | **Per-SNR routing visualization** | ✅ done (`docs/figures/per_snr_routing_2zboo1rh.png`, exp26) |
