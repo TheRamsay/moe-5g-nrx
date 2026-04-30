@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 import sionna
 import tensorflow as tf
-from sionna.channel.tr38901 import TDL, AntennaArray, UMa
+from sionna.channel.tr38901 import CDL, TDL, AntennaArray, UMa
 
 from .constants import (
     ChannelProfile,
@@ -66,6 +66,7 @@ class SionnaNRXSimulator:
         self._rng = np.random.default_rng(config.seed)
         self._tf_rng = self._build_tf_rng(config.seed)
         self._tdl_channels: dict[str, TDL] = {}
+        self._cdl_channels: dict[str, CDL] = {}
         self._uma_channel: UMa | None = None
         if config.seed is not None:
             sionna.config.seed = int(config.seed)
@@ -207,6 +208,20 @@ class SionnaNRXSimulator:
             response = self._cir_to_ofdm_response(cir_coeffs, cir_delays, freq)
             return self._normalize_channel_power(response)
 
+        cdl_model = {
+            ChannelProfile.CDLA: "A",
+        }.get(self.cfg.channel_profile)
+        if cdl_model is not None:
+            channel = self._get_or_create_cdl(cdl_model)
+            sampling_frequency = self.cfg.subcarrier_spacing_hz * float(freq)
+            cir_coeffs, cir_delays = channel(
+                batch_size=batch_size,
+                num_time_steps=time,
+                sampling_frequency=sampling_frequency,
+            )
+            response = self._cir_to_ofdm_response(cir_coeffs, cir_delays, freq)
+            return self._normalize_channel_power(response)
+
         raise ValueError(f"Unsupported channel profile: {self.cfg.channel_profile}")
 
     def _sample_uma_channel(self, batch_size: int, freq: int, time: int) -> np.ndarray:
@@ -318,6 +333,44 @@ class SionnaNRXSimulator:
         )
         self._tdl_channels[model] = tdl
         return tdl
+
+    def _get_or_create_cdl(self, model: str) -> CDL:
+        cached = self._cdl_channels.get(model)
+        if cached is not None:
+            return cached
+
+        # CDL needs antenna arrays (unlike TDL). Same SIMO 1x4 layout as UMa.
+        ut_array = AntennaArray(
+            num_rows=1,
+            num_cols=1,
+            polarization="single",
+            polarization_type="V",
+            antenna_pattern="38.901",
+            carrier_frequency=self.cfg.carrier_frequency_hz,
+            dtype=tf.complex64,
+        )
+        bs_array = AntennaArray(
+            num_rows=1,
+            num_cols=self.cfg.num_rx_antennas,
+            polarization="single",
+            polarization_type="V",
+            antenna_pattern="38.901",
+            carrier_frequency=self.cfg.carrier_frequency_hz,
+            dtype=tf.complex64,
+        )
+        cdl = CDL(
+            model=model,
+            delay_spread=self.cfg.delay_spread_s,
+            carrier_frequency=self.cfg.carrier_frequency_hz,
+            ut_array=ut_array,
+            bs_array=bs_array,
+            direction="uplink",
+            min_speed=self.cfg.min_speed_mps,
+            max_speed=self.cfg.max_speed_mps,
+            dtype=tf.complex64,
+        )
+        self._cdl_channels[model] = cdl
+        return cdl
 
     def _cir_to_ofdm_response(
         self,
