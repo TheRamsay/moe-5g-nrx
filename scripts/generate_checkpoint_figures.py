@@ -43,13 +43,13 @@ def pareto_plot():
 
     # Dense baselines
     dense = [
-        ("Dense nano", 320, (0.971 + 0.951) / 2),
-        ("Dense small", 842, (0.911 + 0.951) / 2),
+        ("Dense nano", 320, (0.971 + 0.961) / 2),
+        ("Dense small", 695, (0.911 + 0.951) / 2),
         ("Dense large", 1604, (0.866 + 0.936) / 2),
     ]
     for name, flops, bler in dense:
         ax.scatter(flops, bler, marker="s", s=50, color=C_GREY, zorder=5)
-        ha, dx = ("left", 30) if "large" not in name else ("right", -30)
+        ha, dx = ("left", 12) if "large" not in name else ("right", -12)
         ax.annotate(
             name,
             (flops, bler),
@@ -73,13 +73,13 @@ def pareto_plot():
         ax.scatter(flops, bler, marker=marker, s=70, color=color, zorder=10, edgecolors="white", linewidths=0.5)
         dx, dy, ha, va = 8, 5, "left", "bottom"
         if "Phase 2" in name:
-            dx, dy, ha, va = -8, -8, "right", "top"
+            dx, dy, ha, va = -8, 5, "right", "bottom"
         elif "Phase 1" in name:
-            dx, dy, ha, va = -8, -8, "right", "top"
+            dx, dy, ha, va = -8, 5, "right", "bottom"
         elif "6k" in name:
             dx, dy, ha, va = -8, 5, "right", "bottom"
         elif "12k" in name:
-            dx, dy, ha, va = 8, 5, "left", "bottom"
+            dx, dy, ha, va = 8, -5, "left", "top"
         elif "beta" in name:
             dx, dy, ha, va = 8, -8, "left", "top"
         ax.annotate(
@@ -348,7 +348,7 @@ def expert_usage_plot():
 
     ax.set_xlabel("Training Step")
     ax.set_ylabel("Expert Usage (EMA)")
-    ax.legend(loc="right", framealpha=0.9)
+    ax.legend(loc="center right", bbox_to_anchor=(0.98, 0.62), framealpha=0.9)
     ax.set_ylim(-0.02, 1.02)
     ax.set_xlim(0, 12500)
     ax.set_xticks([0, 2000, 4000, 6000, 8000, 10000, 12000])
