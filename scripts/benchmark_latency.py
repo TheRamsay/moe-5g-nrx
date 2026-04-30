@@ -142,6 +142,12 @@ def main() -> int:
         help="If set, also benchmark on real test data from data_dir/{uma,tdlc}.pt",
     )
     parser.add_argument("--out", type=Path, default=Path("latency_results.json"))
+    parser.add_argument(
+        "--models",
+        nargs="+",
+        default=None,
+        help="If set, only benchmark these model labels (e.g. --models exp26_moe dense_large)",
+    )
     args = parser.parse_args()
 
     device = torch.device(args.device)
@@ -156,7 +162,8 @@ def main() -> int:
             if (args.data_dir / f"{prof}.pt").exists():
                 real_profiles.append(prof)
 
-    for label, ref in CHECKPOINTS:
+    checkpoints = [(label, ref) for label, ref in CHECKPOINTS if args.models is None or label in args.models]
+    for label, ref in checkpoints:
         print(f"[INFO] {label} ({ref})", file=sys.stderr)
         ckpt_path = _download_artifact(ref)
         model, _config = load_checkpoint(ckpt_path, device)
