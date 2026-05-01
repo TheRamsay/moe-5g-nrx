@@ -1,0 +1,50 @@
+name: compute_aware_moe_nrx
+family: moe
+
+# Two-decoder MoE — sink + nano + large.
+# Tests whether nano can serve BOTH the "hopeless" and "borderline" regimes
+# (the middle-expert investigation showed nano gets BER 0.237 on small's
+# routed samples — virtually identical to small's 0.230). If nano can absorb
+# small's role at half the FLOPs, this is the optimal final architecture.
+
+shared_stem:
+    state_dim: 56
+    stem_hidden_dims: [64, 64]
+    activation: relu
+    pilot_symbol_indices: [2, 11]
+    pilot_subcarrier_spacing: 2
+
+backbone:
+    pilot_symbol_indices: ${model.shared_stem.pilot_symbol_indices}
+    pilot_subcarrier_spacing: ${model.shared_stem.pilot_subcarrier_spacing}
+
+router:
+    type: channel_aware
+    hidden_dim: 64
+    training_gate: gumbel_softmax
+    inference_gate: top1
+    temperature: 1.0
+    min_temperature: 0.5
+    use_input_statistics: false
+
+experts:
+    sink:
+        type: sink
+    nano:
+        type: decoder
+        num_cnn_blocks: 4
+        block_hidden_dim: 8
+        readout_hidden_dim: 32
+    large:
+        type: decoder
+        num_cnn_blocks: 8
+        block_hidden_dim: 64
+        readout_hidden_dim: 128
+
+compute:
+    routing: sparse
+    active_experts: 1
+    flops_penalty_alpha: 0.0
+    load_balance_beta: 0.0
+    flops_normalizer: 1.0
+    channel_loss_weight: 0.05
