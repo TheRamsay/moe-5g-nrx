@@ -48,10 +48,67 @@ Honest framing: *"Recipe at α=2e-3 is bimodal (2/6). The α=1e-3 variant at 100
 
 **Headline-publishable claim:** *"At 100k samples, the asym-warm recipe with α scaled inversely (α=1e-3 instead of 2e-3) reproduces exp26's test BLER within 0.001 at slightly higher compute (+2.6pp FLOPs). Two collapsed runs at 100k+α=2e-3 (exp40, exp58) explained by the α/data scaling principle, with the principle's correctness confirmed by exp60's recovery to exp26-quality on the locked test set."*
 
+### Middle-expert investigation (DONE 2026-05-01, job 19595953)
+
+Counterfactual analysis of exp26 — for each test sample, ran ALL 3 experts
+(forced) and recorded per-sample BER, BLER, channel MSE, bit confidence.
+
+**Key finding — small is a PARTIAL DECODER, not a sink:**
+
+| Expert | BER on routed samples | BLER | Interpretation |
+|---|---:|---:|---|
+| **nano** | **0.432** | 1.0 | ≈ random (true junk) on hopeless samples |
+| **small** | **0.230** | 1.0 | **77% of bits correct** — partial decode but BLER fails |
+| large | 0.025 | 0.768 | near-perfect when it works |
+
+**Counterfactual on small's routed samples:**
+
+| Forced expert | BER | BLER |
+|---|---:|---:|
+| nano | 0.237 | 1.0 |
+| **small** | **0.230** | **1.0** |
+| large | 0.231 | 1.0 ← LARGE FAILS TOO |
+
+**Mechanism revealed:** the router routes to small NOT because small can decode
+but because **NO expert can decode these samples**, and small produces virtually
+identical partial-decode quality to large at half the FLOPs. Routing to large
+would waste compute for the same (failing) outcome.
+
+**Practical interpretation (5G receiver context):** small's 77% bit accuracy
+is NOT usable as transmitted data — pre-LDPC BER 0.23 exceeds typical LDPC
+correction threshold (~0.05–0.10), so the block fails and HARQ retransmission
+is requested. The router's value is **identifying samples that no expert can
+decode and routing to the cheapest such expert** — pure compute optimization
+on hopeless samples, not partial-recovery via small.
+
+**Why exp61 v2 (sink + channel_only + large) failed:** channel_only outputs
+zero bits, so the router can't see "small-quality partial decode" anywhere
+except large. Forced to route to large for any non-hopeless sample. Small
+was load-bearing for partial-decode gradient signal during training.
+
+**Why nano is essentially a true sink in exp26:** nano's BER on its routed
+samples is 0.43 ≈ random. It's not partial-decoding — it's confirming
+hopelessness. Replacing nano with sink (0 FLOPs) should be near-equivalent.
+
+Outputs: `docs/figures/middle_expert_q{1,2,3,4,5}_*.png`,
+`docs/figures/middle_expert_results.json`.
+
+### Architectural sweep summary (in flight 2026-05-01)
+
+Three follow-up architectures testing the middle-expert findings:
+
+| Exp | Architecture | Total params | Predicted BLER | Predicted FLOPs |
+|---|---|---:|---|---|
+| **exp26** (reference) | nano + small + large | 583k | 0.902 | 56% |
+| **exp61 v2** (sink + channel_only + large) | 567k | ✓ matched 0.900 | ✗ 78% (worse) |
+| **exp64** (sink + small + large) | 572k | should match | should be ~52% |
+| **exp65** (sink + nano + large) | 467k | tests user's bold-sub | ~40% if works, +5pp if not |
+
 ### Currently in flight (2026-05-01)
 
-- **19594735** — exp61 v2 (CLEAN function-specialized: sink + channel_only + large, 567k params). ~3h walltime. Will tell us whether the 5-expert v1 result (BLER 0.911 / real_flops 0.35) holds for the proper 3-expert architecture.
 - **19594871** — exp63 (10k + α=2e-3) — lower-bound data-scaling test. Brackets the data story below 50k.
+- **19595889** — exp64 ({sink, small, large}) — safe synthesis. Replace nano with sink, keep small as partial-decoder middle tier.
+- **19596144** — exp65 ({sink, nano, large}) — bold simplification. Drop small entirely; test if nano can serve both regimes alone.
 
 ---
 
