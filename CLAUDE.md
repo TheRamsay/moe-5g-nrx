@@ -432,11 +432,16 @@ on OOD (router defaults to nano under unfamiliar features) — separate behavior
 
 `experiments/2026-04-26-moe-largewarmup-v1/` (exp32/33/34): freeze nano+small for first
 2k steps. Result: **all 3 seeds collapse to 100% large** (Phase 2 v1 failure mode).
-Mean test BLER ~0.86, FLOPs 100%. Over-corrects.
+Mean **TDLC** BLER 0.855 (mean UMa 0.940; avg-over-profiles 0.897), FLOPs 100%. Over-corrects.
 
 `experiments/2026-04-26-moe-betawarmup-v1/` (exp35/36/37): β=0.5 for first 4k steps,
-drop to 0.1. Result: **3 different routing patterns**, mean test BLER **0.938 ± 0.024**
-— *worse* than no-warmup baseline (0.921 ± 0.032). β-warmup hurts.
+drop to 0.1. Result: **3 different routing patterns**, mean **TDLC** BLER **0.936 ± 0.043**
+(mean UMa 0.967; avg-over-profiles 0.951 ± 0.029) — *worse* than no-warmup baseline.
+β-warmup hurts.
+
+> **Labelling note:** The mean BLER values above are averaged across the three
+> seeds, *per profile*. Some earlier reports cited the TDLC-only mean as
+> "mean test BLER" without qualification — corrected here to be explicit.
 
 > "Two stabilization recipes attempted; neither produced robust seed-stable
 > heterogeneous routing. Asym-warm bimodality appears intrinsic to the asym init choice.
