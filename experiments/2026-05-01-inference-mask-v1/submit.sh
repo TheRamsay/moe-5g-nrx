@@ -10,7 +10,7 @@
 
 cd /storage/brno2/home/ramsay/moe-5g-nrx
 /storage/brno2/home/ramsay/.local/bin/uv run --offline --python 3.10 python scripts/evaluate_inference_mask.py \
-  --checkpoint knn_moe-5g-nrx/moe-5g-nrx/model-moe_alphasweep_asym_a2e3_s67-t6lkdep2:best \
+  --checkpoint /storage/brno2/home/ramsay/moe-5g-nrx/results/19457671.pbs-m1.metacentrum.cz/checkpoints/compute_aware_moe_nrx_best.pt \
   --data-dir /storage/brno2/home/ramsay/moe-5g-datasets/dense-v1/test \
   --out-json /storage/brno2/home/ramsay/moe-5g-nrx/docs/figures/inference_mask_results.json \
   --max-samples 32768 \
