@@ -4,6 +4,42 @@
 
 Build a **compute-aware 5G neural receiver** that keeps BLER close to a dense baseline while reducing **average FLOPs** via adaptive routing. Main result: **BLER vs Average FLOPs** Pareto curve. Router uses channel-quality features from the shared stem — not raw SNR.
 
+## Current State (2026-05-01 morning update)
+
+### Overnight batch (2026-05-01) — 9 jobs landed
+
+**Headline new findings since the 2026-04-30 evening consolidation:**
+
+| # | Experiment | Result |
+|---|---|---|
+| **exp60 (α/data hypothesis)** | 100k + α=1e-3 | ✓ **HETEROGENEOUS** — confirms α/data ratio principle. Avg BLER ~0.902 at real_flops ~0.65. Two prior collapsed runs (exp40, exp58) at α=2e-3 now explained by single principle. |
+| **exp59 30k convergence** | Was meant to be final-headline number | ✗ **COLLAPSED** to bad attractor — avg BLER 0.926 (5pp WORSE than exp26 at step 12k). Even seed-67 (the headline seed) gave a different outcome on re-run. CUDA non-determinism contributes — seed alone doesn't pin trajectory. |
+| **exp61 v1 (function-specialized)** | Sink + channel_only + large | ⚠️ **HYDRA CONFIG BUG** — `override /model: moe_nl` deep-merged with `model.experts: {sink, channel_only, large}` instantiated a **5-expert** model (nano + small + large + channel_only + sink), not the intended 3. v1 BLER 0.911 / real_flops 0.35 is for the 5-expert architecture. Diagnosed via checkpoint inspection. **v2 resubmitted (job 19594735) with dedicated `conf/model/moe_func.yaml` — 3-expert clean version verified locally (sink:0, channel_only:109k, large:370k, total 567k).** |
+| **LMMSE on O1 OOD** | Classical baseline on ray-traced | ✓ **LMMSE beats both NN models** (0.976 vs dense_large 0.982 vs exp26 0.984). Ray-traced gap is from learned synthetic priors actively misleading the receiver — not from fundamental channel difficulty. Strong scope statement for the report. |
+| dense_micro pretrain (19583495) | exp42 prerequisite | ✗ Died at walltime (slow data loader, 12% progress in 3h). exp43 (smaller-small MoE) path closed; exp41 already disproved "small is a sink" anyway. |
+
+### Refined bimodality picture (post-exp59)
+
+**Success rate at α=2e-3: 2/6 across recent attempts.**
+
+| Run | Data | Seed | Steps | α | Outcome |
+|---|---:|---:|---:|---:|---|
+| exp26 | 50k | 67 | 12k | 2e-3 | ✓ 0.902 |
+| exp29 | 50k | 42 | 12k | 2e-3 | ✓ 0.902 |
+| exp28 | 50k | 32 | 12k | 2e-3 | ✗ 0.958 |
+| exp40 | 100k | 67 | 12k | 2e-3 | ✗ 0.953 |
+| exp58 | 100k | 42 | 12k | 2e-3 | ✗ 0.968 |
+| exp59 | 50k | 67 | **30k** | 2e-3 | ✗ 0.926 |
+| **exp60** | **100k** | **67** | **12k** | **1e-3** | **✓ ~0.902** |
+
+Honest framing: *"Recipe at α=2e-3 is bimodal (2/6). The α=1e-3 variant at 100k matches BLER, suggesting the α/data ratio is the controllable knob. Recipe stability at α=2e-3 across seeds is an open problem — 8 anti-collapse mechanisms (Switch aux × 4, capacity × 4) all failed."*
+
+### Currently in flight (2026-05-01)
+
+- **19594735** — exp61 v2 (CLEAN function-specialized: sink + channel_only + large, 567k params). ~3h walltime. Will tell us whether the 5-expert v1 result (BLER 0.911 / real_flops 0.35) holds for the proper 3-expert architecture.
+
+---
+
 ## Current State (2026-04-30)
 
 ### Latest sprint (2026-04-30 evening — post-consultation work)

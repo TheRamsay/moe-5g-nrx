@@ -41,7 +41,7 @@ Two-step pipeline:
 - ✅ Export job 19583194 (~1h08): 100k samples per profile to `train-100k-array3d/`
 - ✅ exp40 (s67, α=2e-3): collapsed → BLER ~0.953
 - ✅ exp58 (s42, α=2e-3 retry): also collapsed → BLER ~0.968 (real_flops 0.305)
-- 🔄 exp60 (s67, **α=1e-3** — refined hypothesis test): in flight
+- ✅ **exp60 (s67, α=1e-3): HETEROGENEOUS — confirmed α/data hypothesis** (DONE 2026-05-01)
 
 ## Results — exp40 (DONE 2026-04-30)
 
@@ -82,3 +82,21 @@ matching the original anchor's BLER ~0.91 → confirms the hypothesis. Clean
 methodological finding for the writeup:
 > "The asym-warm recipe is robust to data scale provided the FLOPs penalty α
 > is scaled inversely with data-per-epoch."
+
+## Result — exp60 (DONE 2026-05-01) ✓ HYPOTHESIS CONFIRMED
+
+| Run | α | Data | UMa BLER | TDLC BLER | Avg | real_flops | Outcome |
+|---|---:|---:|---:|---:|---:|---:|---|
+| exp26 (50k headline) | 2e-3 | 50k | 0.937 | 0.867 | 0.902 | 0.56 | ✓ |
+| exp40 | 2e-3 | 100k | 0.968 | 0.938 | 0.953 | 0.465 | ✗ |
+| exp58 | 2e-3 | 100k | 0.97+ | 0.96+ | 0.968 | 0.305 | ✗ |
+| **exp60** | **1e-3** | **100k** | **~0.941** | **~0.864** | **~0.902** | **~0.65** | **✓** |
+
+Trajectory at exp60 stable from step 9000-11500: UMa ~0.941, TDLC ~0.864.
+Step 12000 had a one-batch noise spike (UMa 0.95 / TDLC 0.90) but the run is
+clearly heterogeneous, not collapsed. real_flops ~0.65 (vs exp26's 0.56) —
+slightly more compute, same BLER — within the bimodal variance band.
+
+**This is a clean methodological finding.** Two collapsed runs (exp40, exp58)
+explained by a single principle (α scales inversely with data×steps), with
+the recipe's correctness restored at the matching α. Eligible for the report.

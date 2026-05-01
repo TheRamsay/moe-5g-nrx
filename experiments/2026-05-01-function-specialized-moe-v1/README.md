@@ -1,4 +1,23 @@
-# Function-Specialized MoE — Sink + Channel-Only + Decoder (v1)
+# Function-Specialized MoE — Sink + Channel-Only + Decoder (v1) — CONFOUNDED
+
+> **⚠️ Hydra config bug:** v1 (job 19588534) silently kept moe_nl's
+> nano + small experts via deep-merge alongside the new sink/channel_only/large.
+> Instantiated model had **5 experts**, not 3. Results below are valid for a
+> 5-expert architecture but do NOT cleanly test the function-specialized hypothesis.
+>
+> **Clean version: see `2026-05-01-function-specialized-moe-v2/`** (job 19594735).
+>
+> Checkpoint inspection of v1 confirmed the bug:
+> ```
+> nano:         10,220 params  ← from moe_nl, should NOT be here
+> small:        115,468 params  ← from moe_nl, should NOT be here
+> large:        369,868 params
+> channel_only: 109,608 params
+> sink:         (0 params)
+> Total:        692k (vs intended 567k)
+> ```
+>
+> **v1 result:** avg BLER ~0.911, real_flops ~0.35 (5-expert).
 
 ## Question
 
