@@ -1,0 +1,49 @@
+# @package _global_
+# Experiment 63: 10k samples × α=2e-3 (lower-bound data-scaling test).
+#
+# Brackets the α/data principle from below. Teacher's concern was "50k might
+# be too small" — we showed 100k matches 50k (exp60). This tests whether the
+# recipe still works at 1/5 the headline data size, holding α at the headline
+# value to first establish whether the recipe survives small data at all.
+#
+# If exp63 (10k, α=2e-3) collapses → α/data principle holds in BOTH directions
+# (need to scale α UP for less data). Follow-up exp64 would try α=5e-3 (or 1e-2).
+# If exp63 succeeds → recipe is robust across {10k, 50k} at α=2e-3 — even nicer story.
+
+defaults:
+  - override /model: moe_nl
+  - override /dataset: mixed
+
+experiment:
+  batch_name: data-scaling-10k-v1
+  exp_name: moe_a2e3_10k_s67
+  tags: [moe, data-scaling, asymmetric-warmstart, hf, simo-1x4, 16qam, nl-range, lower-bound]
+  notes: >
+    Lower-bound test: 10k samples (1/5 of headline 50k) at α=2e-3. Tests whether
+    the asym-warm recipe survives small data without α adjustment.
+  study_slug: 2026-05-01-data-scaling-10k-v1
+  study_path: experiments/2026-05-01-data-scaling-10k-v1
+  question: Does the headline recipe still produce heterogeneous routing at 10k samples?
+
+model:
+  compute:
+    flops_penalty_alpha: 2e-3
+    load_balance_beta: 0.1
+
+training:
+  hf_dataset: Vack0/moe-5g-nrx
+  batch_size: 128
+  learning_rate: 1e-3
+  weight_decay: 1e-4
+  max_steps: 12000
+  seed: 67
+  freeze_experts: false
+  warm_start:
+    stem_checkpoint: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_large_final20k_constant_lr_s67-55l1dpby:best"
+    experts:
+      nano: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_nano_final20k_constant_lr_s67-aos4hhid:best"
+      small: "knn_moe-5g-nrx/moe-5g-nrx/model-dense_small_final20k_constant_lr_s67-kivdz4qu:best"
+
+validation:
+  every_n_steps: 500
+  snr_bins: 5
