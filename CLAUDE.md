@@ -116,9 +116,30 @@ Lower-bound data-scaling test. **BLER-robust but routing-policy degrades.**
 | **exp63 (10k+α=2e-3, train EMA)** | **0.943** | **0.868** | **0.906** | **66%** | **74%** | **71%** |
 
 (All values cited as `train/profile/{prof}/ema/realized_flops_ratio` and
-`val/{prof}/bler` from each job's `wandb-summary.json` for fair comparison.
-exp26 has eval-set values too — UMa 0.937 / TDLC 0.867 / FLOPs 56% — but
-exp63 hasn't been eval-evaluated yet, so we compare on train EMA both sides.)
+`val/{prof}/bler` from each job's `wandb-summary.json` for fair comparison.)
+
+**EXP63 TEST-SET LOCKED (eval66, job 19597107, DONE 2026-05-01 ~13:25):**
+
+Verified from `results/19597107.../wandb-summary.json`:
+
+| Metric | exp63 train EMA (val) | **exp63 test (eval66)** |
+|---|---:|---:|
+| UMa BLER | 0.943 | **0.9380** |
+| TDLC BLER | 0.868 | **0.8701** |
+| Avg BLER | 0.906 | **0.9041** |
+| UMa realized FLOPs | — | 1016188018 / 1604270464 = **0.633** (63%) |
+| TDLC realized FLOPs | — | 1218156568 / 1604270464 = **0.759** (76%) |
+| Avg FLOPs | 0.71 | **0.696** (~70%) |
+
+**Eval-set routing (W&B summary `eval/{prof}/expert_usage/...`):**
+
+| | TDLC large/small/nano | UMa large/small/nano |
+|---|---|---|
+| exp63 (eval) | **57.6% / 42.4% / 0.0%** | **35.4% / 64.6% / 0.0%** |
+
+Test-set confirms train EMA: nano completely abandoned on test set too. BLER 0.904 (vs exp26 test 0.902), FLOPs 70% (vs exp26 test 56%).
+
+For comparison, exp26 eval-set values from `results/19458709.../wandb/.../2zboo1rh/...` — UMa 0.9369 / TDLC 0.8674 / FLOPs avg 55.8%.
 
 **Routing distribution (train EMA per profile):**
 
@@ -212,10 +233,24 @@ Three sink-based architecture attempts vs the inference-time substitution:
 
 This reframes the contribution: not just "compute-aware MoE" but "**training scaffold for compute-aware inference**" — train with diverse experts for routing-policy learning, then prune at deployment.
 
-### Currently in flight (2026-05-01 ~12:30)
+### Currently in flight (2026-05-01 ~14:00)
 
-- **19597107** — eval66: exp63 (10k+α=2e-3) test-set eval. Locks the 10k headline number for the data-scaling story (currently val-only at 0.906).
-- **19597108** — inference-mask Pareto sweep: applies Mode A + B to exp25 (α=1e-3), exp26 (α=2e-3), exp27 (α=5e-3) checkpoints with **per-SNR breakdown**. Tests whether the training-scaffold finding generalizes across α and across SNR bins. Outputs three JSON files: `inference_mask_exp{25,26,27}.json`.
+- **19599771** — neural-vs-LMMSE per-sample crosstab + SNR slack analysis. Tests if exp26 wins on a SUBSET of samples even though aggregate BLER comparison is unfavorable. Outputs `neural_vs_lmmse_results.json`.
+- **19599789** — inference-mask Pareto **(re-run)**: original JSON outputs from job 19597108 were lost (likely cluster cleanup script overwrote `docs/figures/`). Re-running to restore verifiable JSON evidence for the cross-α Mode B finding. Outputs three JSONs: `inference_mask_exp{25,26,27}.json`.
+- **19599792** — middle-expert investigation **(re-run)**: same lost-cleanup issue. Re-running to restore the per-expert success-rate JSON + 5 figures.
+
+### Audit / verification status (as of 2026-05-01 ~14:00)
+
+- **eval-set numbers** for all training jobs are still verifiable from each job's `wandb-summary.json`
+- **Inference-mask Pareto JSONs were verified once before being lost; re-running** for re-verification
+- **Middle-expert investigation JSONs were verified once before being lost; re-running**
+- **Per-SNR table.json files** (eval46/47) are present — head-to-head LMMSE-vs-NN waterfall data verified above
+
+### Honest framing for the contribution
+
+> **What we verified DOES hold:** exp26 + Mode B inference achieves the dense-NRX baseline BLER (0.9021) at 47% FLOPs (vs dense_large 100%). Training-scaffold finding (small expert is gradient signal during training, discardable at inference) verified across α=1e-3 / 2e-3 / 5e-3 checkpoints (numbers being re-verified from re-run).
+>
+> **What we DO NOT claim:** that neural beats classical LMMSE. LMMSE wins on TDLC and 3GPP in-family OOD; ties on UMa low-SNR; loses narrowly to neural on UMa at SNR ≥ 20 dB. The compute contribution is **vs the dense neural baseline**, not vs classical signal processing.
 
 ---
 
@@ -255,12 +290,39 @@ and evaluated via `scripts/evaluate_lmmse.py`. Three modes form a ladder:
 | **LS-MRC (realistic classical)** | **0.939** | **0.861** | **0.900** | LS estimate + MRC across 4 antennas |
 | **Genie-MRC (oracle)** | **0.908** | **0.800** | **0.854** | True channel + MRC (NOT deployable) |
 
-**Key per-SNR comparison (TDLC waterfall 15-20 dB):**
-- LS-MRC: 0.155 BLER
-- Genie-MRC: 0.027 BLER
-- dense_large: ~0.085 BLER
-- **Channel estimation is the classical bottleneck** — LS vs Genie gap = 13 pp
-- **Neural beats LS-MRC in waterfall** (~10 pp at 14 dB) but **loses to Genie-MRC** at high SNR (with perfect channel info, classical is mathematically optimal for 16-QAM)
+**⚠️ CORRECTED 2026-05-01: per-SNR head-to-head shows LMMSE wins on TDLC at high SNR.**
+The earlier 7-bin comparison "Neural beats LS-MRC by ~10pp at 14 dB" was an apples-to-oranges
+comparison (LMMSE averaged across wide bin vs dense_large at its best single bin). The 20-bin
+head-to-head from eval46/eval47 (verified from W&B table.json files):
+
+| TDLC SNR (dB) | LMMSE (LS-MRC) | dense_large | exp26 (MoE) |
+|---|---:|---:|---:|
+| 11.0–12.5 | 1.0000 | 1.0000 | 1.0000 |
+| 12.5–14.0 | 0.9710 | 0.9545 | 0.9608 |
+| 14.0–15.5 | **0.7050** | 0.7069 | 0.7265 |
+| 15.5–17.0 | **0.3213** | 0.3722 | 0.3697 |
+| 17.0–18.5 | **0.1324** | 0.1850 | 0.1745 |
+| 18.5–20.0 | **0.0502** | 0.0698 | 0.0851 |
+
+**LMMSE wins on TDLC at every waterfall bin from 14-20 dB by 2-5 pp.** Genie-MRC (oracle channel)
+wins by even more — classical math is near-optimal on TDLC's clean cluster channel.
+
+UMa is different — neural ties or narrowly wins at high SNR (verified 20-bin head-to-head):
+
+| UMa SNR (dB) | LMMSE | dense_large | exp26 |
+|---|---:|---:|---:|
+| 14.5–16.0 | 0.9047 | 0.9162 | 0.9168 |
+| 17.5–19.0 | 0.8443 | 0.8443 | 0.8449 |
+| 20.5–22.0 | 0.8100 | 0.7981 | **0.7856** |
+| 22.0–23.5 | 0.7825 | 0.7551 | **0.7651** |
+| 23.5–25.0 | 0.7629 | **0.7320** | 0.7423 |
+
+**UMa: neural slightly wins at SNR ≥ 20 dB by 1-3 pp** (rich multipath structure where learned
+representation pays off). On TDLC and 3GPP in-family OOD profiles, classical LMMSE wins.
+
+Source: `results/19583604.../wandb/.../snr_binned_*.table.json` (eval46 exp26),
+`results/19583605.../wandb/.../snr_binned_*.table.json` (eval47 dense_large),
+`results/19583606.../run.log` (LMMSE 20-bin output).
 
 ### 3GPP in-family OOD (2026-04-30)
 
