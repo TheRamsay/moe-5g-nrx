@@ -5,7 +5,9 @@
 # achieve 0% successful decoding on routed samples — only large decodes
 # (23-29% success rate). Nano/small are pure compute optimizers.
 #
-# Architecture:
+# Architecture (defined in conf/model/moe_func.yaml — standalone, NOT an
+# override of moe_nl, because Hydra deep-merges dicts and would otherwise
+# keep nano/small from moe_nl alongside our new experts):
 #   - sink         : zero parameters; outputs zeros for bits + channel.
 #                    For samples where decoding is hopeless anyway. Saves
 #                    100% of expert FLOPs (only stem cost remains).
@@ -19,7 +21,7 @@
 # architecture maintains BLER while reducing total compute.
 
 defaults:
-  - override /model: moe_nl
+  - override /model: moe_func
   - override /dataset: mixed
 
 experiment:
@@ -31,24 +33,11 @@ experiment:
     + large (full). Direct response to per-expert success-rate finding —
     nano/small never decode, so why give them decoder heads? Saves the
     bit-readout cost on every routed nano/small sample.
-  study_slug: 2026-05-01-function-specialized-moe-v1
-  study_path: experiments/2026-05-01-function-specialized-moe-v1
+  study_slug: 2026-05-01-function-specialized-moe-v2
+  study_path: experiments/2026-05-01-function-specialized-moe-v2
   question: Can sink+channel_only+large match exp26's BLER at lower compute?
 
 model:
-  experts:
-    sink:
-      type: sink
-    channel_only:
-      type: channel_only
-      num_cnn_blocks: 8
-      block_hidden_dim: 32
-      readout_hidden_dim: 96
-    large:
-      type: decoder
-      num_cnn_blocks: 8
-      block_hidden_dim: 64
-      readout_hidden_dim: 128
   compute:
     flops_penalty_alpha: 2e-3
     load_balance_beta: 0.1

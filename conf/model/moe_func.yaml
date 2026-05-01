@@ -1,0 +1,52 @@
+name: compute_aware_moe_nrx
+family: moe
+
+# Function-specialized MoE — only 3 experts:
+#   sink         : zero parameters; produces zeros (cheap-fail option for the router)
+#   channel_only : backbone + readout_channel only (no bit-LLR head)
+#   large        : full decoder (unchanged from exp26 large)
+#
+# Built as a standalone model config (NOT an override of moe_nl) so Hydra's
+# deep dict merge does not silently keep the nano/small entries from moe_nl.
+
+shared_stem:
+    state_dim: 56
+    stem_hidden_dims: [64, 64]
+    activation: relu
+    pilot_symbol_indices: [2, 11]
+    pilot_subcarrier_spacing: 2
+
+backbone:
+    pilot_symbol_indices: ${model.shared_stem.pilot_symbol_indices}
+    pilot_subcarrier_spacing: ${model.shared_stem.pilot_subcarrier_spacing}
+
+router:
+    type: channel_aware
+    hidden_dim: 64
+    training_gate: gumbel_softmax
+    inference_gate: top1
+    temperature: 1.0
+    min_temperature: 0.5
+    use_input_statistics: false
+
+experts:
+    sink:
+        type: sink
+    channel_only:
+        type: channel_only
+        num_cnn_blocks: 8
+        block_hidden_dim: 32
+        readout_hidden_dim: 96
+    large:
+        type: decoder
+        num_cnn_blocks: 8
+        block_hidden_dim: 64
+        readout_hidden_dim: 128
+
+compute:
+    routing: sparse
+    active_experts: 1
+    flops_penalty_alpha: 0.0
+    load_balance_beta: 0.0
+    flops_normalizer: 1.0
+    channel_loss_weight: 0.05
