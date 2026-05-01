@@ -212,6 +212,11 @@ Three sink-based architecture attempts vs the inference-time substitution:
 
 This reframes the contribution: not just "compute-aware MoE" but "**training scaffold for compute-aware inference**" — train with diverse experts for routing-policy learning, then prune at deployment.
 
+### Currently in flight (2026-05-01 ~12:30)
+
+- **19597107** — eval66: exp63 (10k+α=2e-3) test-set eval. Locks the 10k headline number for the data-scaling story (currently val-only at 0.906).
+- **19597108** — inference-mask Pareto sweep: applies Mode A + B to exp25 (α=1e-3), exp26 (α=2e-3), exp27 (α=5e-3) checkpoints with **per-SNR breakdown**. Tests whether the training-scaffold finding generalizes across α and across SNR bins. Outputs three JSON files: `inference_mask_exp{25,26,27}.json`.
+
 ---
 
 ## Current State (2026-04-30)
