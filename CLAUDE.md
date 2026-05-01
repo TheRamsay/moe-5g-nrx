@@ -233,18 +233,32 @@ Three sink-based architecture attempts vs the inference-time substitution:
 
 This reframes the contribution: not just "compute-aware MoE" but "**training scaffold for compute-aware inference**" — train with diverse experts for routing-policy learning, then prune at deployment.
 
-### Currently in flight (2026-05-01 ~14:00)
+### Re-verified 2026-05-01 ~16:20 (after lost-JSON re-runs landed)
 
-- **19599771** — neural-vs-LMMSE per-sample crosstab + SNR slack analysis. Tests if exp26 wins on a SUBSET of samples even though aggregate BLER comparison is unfavorable. Outputs `neural_vs_lmmse_results.json`.
-- **19599789** — inference-mask Pareto **(re-run)**: original JSON outputs from job 19597108 were lost (likely cluster cleanup script overwrote `docs/figures/`). Re-running to restore verifiable JSON evidence for the cross-α Mode B finding. Outputs three JSONs: `inference_mask_exp{25,26,27}.json`.
-- **19599792** — middle-expert investigation **(re-run)**: same lost-cleanup issue. Re-running to restore the per-expert success-rate JSON + 5 figures.
+**Inference-mask Pareto across α-sweep (job 19599789, all 3 JSONs restored):**
 
-### Audit / verification status (as of 2026-05-01 ~14:00)
+| Checkpoint | baseline BLER | A_mask BLER | **B_sink BLER** | baseline FLOPs | A_mask FLOPs | **B_sink FLOPs** |
+|---|---:|---:|---:|---:|---:|---:|
+| exp25 (α=1e-3) | 0.9063 | 0.9063 | 0.9066 | 56.0% | 52.6% | **46.7%** |
+| **exp26 (α=2e-3)** | 0.9021 | 0.9021 | **0.9021** | 55.8% | 55.2% | **47.3%** |
+| exp27 (α=5e-3) | 0.9107 | 0.9107 | 0.9116 | 60.0% | 47.7% | **41.9%** |
 
-- **eval-set numbers** for all training jobs are still verifiable from each job's `wandb-summary.json`
-- **Inference-mask Pareto JSONs were verified once before being lost; re-running** for re-verification
-- **Middle-expert investigation JSONs were verified once before being lost; re-running**
-- **Per-SNR table.json files** (eval46/47) are present — head-to-head LMMSE-vs-NN waterfall data verified above
+Bit-identical to originally cited values. Mode B (sink-substitute small at inference) consistently saves 9–18pp FLOPs at ≤0.001 BLER drift across the entire α sweep — the training-scaffold finding holds across all three α values, not just exp26.
+
+**Middle-expert investigation (job 19599792, JSON + 5 figures restored):**
+Numbers bit-identical to original — UMa q1: nano BER 0.432 / small BER 0.230 / large BER 0.025 (BLER 0.768). Counterfactual on small's routed samples: large gives BER 0.231 BLER 1.0 (large fails on those samples too).
+
+**Neural-vs-LMMSE crosstab (job 19599771, `neural_vs_lmmse_results.json`):**
+
+UMa: NN net +64 wins (336 NN-only / 272 LMMSE-only / 1733 both / 30427 both fail; agreement 98.1%). NN-favored subset has notably lower spatial structure (max eig 2.07 vs 3.22 when LMMSE wins) and lower channel power (0.56 vs 0.89). **NN wins specifically when MIMO geometry is weak.**
+
+TDLC: LMMSE net +220 wins (587 NN-only / 807 LMMSE-only). NN-win and LMMSE-win subsets have identical feature distributions — no clean NN-favored regime exists. SNR-slack at the waterfall: LMMSE crosses BLER=0.1 first at 18.93 dB; NN doesn't cross in the tested SNR range. **LMMSE has ~2-3 dB SNR advantage on TDLC waterfall.**
+
+### Audit / verification status (as of 2026-05-01 ~16:20)
+
+- All in-flight jobs landed and verified
+- All eval-set / inference-mask / middle-expert JSONs present and re-verified
+- Per-SNR table.json files (eval46/47) verified above
 
 ### Honest framing for the contribution
 
