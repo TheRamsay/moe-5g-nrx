@@ -104,11 +104,45 @@ Three follow-up architectures testing the middle-expert findings:
 | **exp64** (sink + small + large) | 572k | should match | should be ~52% |
 | **exp65** (sink + nano + large) | 467k | tests user's bold-sub | ~40% if works, +5pp if not |
 
+### exp63 (10k + α=2e-3) — DONE 2026-05-01 (job 19594871)
+
+Lower-bound data-scaling test. **BLER-robust but routing-policy degrades.**
+
+**Verified train-EMA values (W&B summary `train/profile/{uma,tdlc}/ema/...`):**
+
+| | UMa BLER | TDLC BLER | Avg BLER | UMa FLOPs% | TDLC FLOPs% | Avg FLOPs% |
+|---|---:|---:|---:|---:|---:|---:|
+| exp26 (50k+α=2e-3, train EMA) | 0.941 | 0.864 | **0.902** | 46% | 66% | **57%** |
+| **exp63 (10k+α=2e-3, train EMA)** | **0.943** | **0.868** | **0.906** | **66%** | **74%** | **71%** |
+
+(All values cited as `train/profile/{prof}/ema/realized_flops_ratio` and
+`val/{prof}/bler` from each job's `wandb-summary.json` for fair comparison.
+exp26 has eval-set values too — UMa 0.937 / TDLC 0.867 / FLOPs 56% — but
+exp63 hasn't been eval-evaluated yet, so we compare on train EMA both sides.)
+
+**Routing distribution (train EMA per profile):**
+
+| | TDLC large/small/nano | UMa large/small/nano |
+|---|---|---|
+| exp26 | 42% / 39% / 19% | 25% / 39% / 36% |
+| **exp63** | **55% / 45% / 0%** | **41% / 60% / 0%** |
+
+**Verified key finding: nano was completely abandoned** at 10k. The router collapsed to a
+2-tier {small, large} policy. BLER stays close to exp26 (+0.4pp), but FLOPs increases
++14pp because the cheap-skip option (nano routes for hopeless samples) is missing.
+
+**Methodological framing for the report:**
+
+> *"The asym-warm recipe is BLER-robust to data scale (10k → 0.906, 50k → 0.902, 100k+α-scaled → 0.901)
+> but FLOPs-fragile to data scale. With only 10k samples the router cannot develop fine-grained
+> 3-tier routing — it collapses to a coarser 2-tier {small, large} policy and forfeits ~14pp of
+> the FLOPs benefit. Sweet spot at 50k samples where routing develops the full 3-tier hierarchy."*
+
 ### Currently in flight (2026-05-01)
 
-- **19594871** — exp63 (10k + α=2e-3) — lower-bound data-scaling test. Brackets the data story below 50k.
 - **19595889** — exp64 ({sink, small, large}) — safe synthesis. Replace nano with sink, keep small as partial-decoder middle tier.
 - **19596144** — exp65 ({sink, nano, large}) — bold simplification. Drop small entirely; test if nano can serve both regimes alone.
+- **19596197** — inference-mask A+B (no retrain) — tests "training scaffold" hypothesis: can we train with 3 experts but infer with 2?
 
 ---
 
