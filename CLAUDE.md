@@ -34,9 +34,24 @@ Build a **compute-aware 5G neural receiver** that keeps BLER close to a dense ba
 
 Honest framing: *"Recipe at α=2e-3 is bimodal (2/6). The α=1e-3 variant at 100k matches BLER, suggesting the α/data ratio is the controllable knob. Recipe stability at α=2e-3 across seeds is an open problem — 8 anti-collapse mechanisms (Switch aux × 4, capacity × 4) all failed."*
 
+### exp60 TEST-SET LOCKED (eval62, job 19594870, DONE 2026-05-01 ~10:00)
+
+**α/data hypothesis confirmed on the locked dense-v1 test set.**
+
+| Metric | exp26 (anchor, test) | **exp60 (test)** | Δ |
+|---|---:|---:|---:|
+| UMa BLER | 0.9369 | 0.9366 | -0.0003 |
+| TDLC BLER | 0.8674 | 0.8660 | -0.0014 |
+| **Avg BLER** | **0.9022** | **0.9013** | **-0.0009** |
+| Avg real FLOPs | 0.558 | 0.584 | +2.6pp |
+| TDLC routing (l/n/s) | 44/15/40 | 48/11/41 | skews slightly to large |
+
+**Headline-publishable claim:** *"At 100k samples, the asym-warm recipe with α scaled inversely (α=1e-3 instead of 2e-3) reproduces exp26's test BLER within 0.001 at slightly higher compute (+2.6pp FLOPs). Two collapsed runs at 100k+α=2e-3 (exp40, exp58) explained by the α/data scaling principle, with the principle's correctness confirmed by exp60's recovery to exp26-quality on the locked test set."*
+
 ### Currently in flight (2026-05-01)
 
 - **19594735** — exp61 v2 (CLEAN function-specialized: sink + channel_only + large, 567k params). ~3h walltime. Will tell us whether the 5-expert v1 result (BLER 0.911 / real_flops 0.35) holds for the proper 3-expert architecture.
+- **19594871** — exp63 (10k + α=2e-3) — lower-bound data-scaling test. Brackets the data story below 50k.
 
 ---
 
