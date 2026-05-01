@@ -308,32 +308,9 @@ Sionna's clean defaults don't model.
 
 ---
 
-## 7. Wall-Clock Latency — Honest Retraction
+## 7. OOD Generalization
 
-Original synthetic-Gaussian benchmark (2026-04-26) claimed 1.93× speedup. **This does not hold on
-real OFDM data:**
-
-| Model | synth ms/batch | real ms/batch |
-|---|---:|---:|
-| dense_nano  | 1.05 | 1.06 |
-| dense_small | 2.09 | 2.07 |
-| dense_large | 3.32 | 3.28 |
-| **exp26 MoE** | 1.93 | **5.53** |
-
-**exp26 is 1.67× SLOWER than dense_large on real data.** Dense models: real ≈ synthetic. MoE:
-real >> synthetic because hard top-1 routing splits the batch into 3 sequential sub-batches and
-mask indexing + scatter overhead dominates at batch=64.
-
-**Retraction:** the 1.93× speedup claim is withdrawn. **The Pareto frontier is reported in FLOPs
-(hardware-agnostic), NOT latency.** Production sparse-MoE inference (Mixtral-style dispatch
-kernels, vLLM) would be needed to convert FLOPs savings into wall-clock — out of scope for this
-work.
-
----
-
-## 8. OOD Generalization
-
-### 8.1 DeepMIMO ASU Campus (ray-traced 3.5 GHz)
+### 7.1 DeepMIMO ASU Campus (ray-traced 3.5 GHz)
 
 | Model | UMa | TDLC | OOD asu_campus1 |
 |---|---:|---:|---:|
@@ -344,7 +321,7 @@ work.
 **All neural models fail on ray-traced.** Few-shot fine-tune (2k samples, 500 steps) did not
 recover (post-FT 0.991). No catastrophic forgetting — in-dist BLER and routing preserved.
 
-### 8.2 Why ASU fails — the synthetic prior misleads
+### 7.2 Why ASU fails — the synthetic prior misleads
 
 LMMSE on O1 ray-traced (different scenario, same family): **0.976** vs dense_large 0.982 vs exp26
 0.984. LMMSE *beats* both NN models on ray-traced, indicating the gap is from **learned synthetic
@@ -355,7 +332,7 @@ domain-randomized pretraining — out of scope for this work.**
 
 ---
 
-## 9. Final Pareto Frontier
+## 8. Final Pareto Frontier
 
 | Run | Avg BLER | FLOPs % | Story |
 |---|---:|---:|---|
@@ -367,7 +344,7 @@ domain-randomized pretraining — out of scope for this work.**
 
 ---
 
-## 10. What Worked, What Didn't (Honest Summary)
+## 9. What Worked, What Didn't (Honest Summary)
 
 **Worked:**
 - Asym warm-start with **cold large** (uniquely effective per symmetric sweep)
@@ -383,17 +360,15 @@ domain-randomized pretraining — out of scope for this work.**
 - Sink-as-an-expert × 3 architectures (training-time collapse)
 - Large-warmup / β-warmup stabilization (over-correct or worsen mean BLER)
 - DeepMIMO few-shot fine-tune (insufficient signal at 2k samples / 500 steps)
-- Wall-clock speedup on real data (dispatch overhead negates FLOPs win)
 
 **Open problems:**
 - Recipe stability at α=2e-3 (2/6 seed reproducibility)
 - OOD generalization to ray-traced channels
 - Hand-rule SNR-oracle cascade slightly dominates learned router → motivates explicit SNR input
-- Wall-clock realization of FLOPs savings (needs sparse-MoE dispatch kernels)
 
 ---
 
-## 11. Comparison to Related Work
+## 10. Comparison to Related Work
 
 - **Wiesmayr 2024 (NRX):** static dense receiver — our dense_large baseline
 - **Honkala 2021 (DeepRx):** end-to-end neural receiver, pilot-reduction story; we cite as
@@ -407,7 +382,7 @@ domain-randomized pretraining — out of scope for this work.**
 
 ---
 
-## 12. Honest Scope Statement (for the report)
+## 11. Honest Scope Statement (for the report)
 
 This work demonstrates compute-aware MoE for 5G neural receivers on **synthetic Sionna data** (UMa
 + TDL-C) and frames the contribution as a **training scaffold for compute-aware inference**:
@@ -420,7 +395,6 @@ inference) is verified across α = 1e-3 / 2e-3 / 5e-3 checkpoints.
 - vs classical LMMSE: scope statement, not victory — LMMSE wins TDLC and in-family 3GPP OOD;
   ties on UMa low-SNR; loses narrowly to neural at high-SNR UMa with weak MIMO geometry
 - Ray-traced OOD requires fine-tune; all neural decoders fail zero-shot
-- Wall-clock realization of FLOPs savings requires production sparse-MoE dispatch
 - Recipe stability is bimodal (2/6 seeds at α=2e-3); α/data ratio is the controllable knob
 
 The contribution is **to the neural-receiver literature**: *if* you've already chosen a neural
