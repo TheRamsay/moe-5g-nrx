@@ -151,6 +151,38 @@ def evaluate_with_mode(model, loader, device, mode: str, max_samples: int) -> di
 
     max_flops = float(model.max_flops.item())
     n_actual = len(bers)
+
+    # Per-SNR binning (7 bins across the SNR range, like the dense-eval pipeline)
+    n_bins = 7
+    edges = np.linspace(snrs.min(), snrs.max(), n_bins + 1)
+    bin_idx = np.digitize(snrs, edges[1:-1])
+    per_snr = []
+    for b in range(n_bins):
+        m = bin_idx == b
+        nb = int(m.sum())
+        if nb == 0:
+            per_snr.append(
+                {
+                    "snr_lo": float(edges[b]),
+                    "snr_hi": float(edges[b + 1]),
+                    "n": 0,
+                    "bler": float("nan"),
+                    "ber": float("nan"),
+                    "realized_flops_ratio": float("nan"),
+                }
+            )
+        else:
+            per_snr.append(
+                {
+                    "snr_lo": float(edges[b]),
+                    "snr_hi": float(edges[b + 1]),
+                    "n": nb,
+                    "bler": float(blers[m].mean()),
+                    "ber": float(bers[m].mean()),
+                    "realized_flops_ratio": float(flops_per_sample[m].mean() / max_flops),
+                }
+            )
+
     return {
         "n": n_actual,
         "ber_mean": float(bers.mean()),
@@ -161,6 +193,7 @@ def evaluate_with_mode(model, loader, device, mode: str, max_samples: int) -> di
         "base_flops": base_flops,
         "routing_pct": {name: routing_counts[name] / n_actual for name in EXPERT_NAMES},
         "sink_redirect_pct": routing_counts["sink_redirect"] / n_actual,
+        "per_snr": per_snr,
     }
 
 

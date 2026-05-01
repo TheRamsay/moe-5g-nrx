@@ -1,0 +1,24 @@
+# @package _global_
+# Eval66: locked test-set evaluation of exp63 (10k + α=2e-3).
+# Locks the lower-bound data-scaling headline number for the report.
+
+defaults:
+  - override /model: moe_nl
+  - override /dataset: mixed
+
+experiment:
+  batch_name: data-scaling-10k-test-eval-v1
+  exp_name: eval_exp63_test
+  tags: [eval, moe, data-scaling, lower-bound, test-set, asym-warm, hf, simo-1x4, 16qam]
+  notes: >
+    Test-set eval of exp63 (10k samples × α=2e-3, asym warm start, seed 67)
+    on the locked dense-v1 test set. Locks the headline number for the
+    lower-bound data-scaling story.
+  study_slug: 2026-05-01-data-scaling-10k-v1
+  study_path: experiments/2026-05-01-data-scaling-10k-v1
+  question: Does exp63's val-set BLER ~0.906 hold on the test set?
+
+evaluation:
+  profiles: [uma, tdlc]
+  snr_bins: 7
+  use_artifacts: false

@@ -10,6 +10,6 @@
 
 export REPO_ROOT="${PBS_O_WORKDIR}"
 export ENTRYPOINT="scripts/analyze_router_mechanism.py"
-export RUN_ARGS="--checkpoint knn_moe-5g-nrx/moe-5g-nrx/model-moe_alphasweep_asym_a2e3_s67-t6lkdep2:best --data-dir /storage/brno2/home/ramsay/moe-5g-datasets/dense-v1/test --max-samples 4000 --device cuda --out docs/figures"
+export RUN_ARGS="--checkpoint knn_moe-5g-nrx/moe-5g-nrx/model-moe_alphasweep_asym_a2e3_s67-t6lkdep2:best --data-dir /storage/brno2/home/ramsay/moe-5g-datasets/dense-v1/test --max-samples 4000 --device cuda --out /storage/brno2/home/ramsay/moe-5g-nrx/docs/figures"
 
 bash "${PBS_O_WORKDIR}/scripts/metacentrum_job.sh"
