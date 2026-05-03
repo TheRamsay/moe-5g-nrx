@@ -1,0 +1,129 @@
+%==============================================================================
+% Compute-Aware Mixture-of-Experts for Efficient 5G Neural Receivers
+% KNN project report, FIT BUT
+% Stripped fitthesis frontmatter (no abstract/keywords/declaration/supervisor),
+% kept the VUT title page styling.
+% Authors: Dominik Huml (xhumld00), Jakub Kontrik (xkontr02), Martin Vaculik (xvaculm00)
+%==============================================================================
+\documentclass[english]{fitthesis}
+
+\renewcommand{\rmdefault}{lmr}
+\renewcommand{\sfdefault}{qhv}
+\renewcommand{\ttdefault}{lmtt}
+
+\csdoublequotesoff
+
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{siunitx}
+
+\ifWis
+\ifx\pdfoutput\undefined
+\else
+  \usepackage{color}
+  \usepackage[unicode,colorlinks,hyperindex,plainpages=false,pdftex]{hyperref}
+  \definecolor{hrcolor-ref}{RGB}{223,52,30}
+  \definecolor{hrcolor-cite}{HTML}{2F8F00}
+  \definecolor{hrcolor-urls}{HTML}{092EAB}
+  \hypersetup{
+    linkcolor=hrcolor-ref,
+    citecolor=hrcolor-cite,
+    filecolor=magenta,
+    urlcolor=hrcolor-urls
+  }
+  \def\pdfBorderAttrs{/Border [0 0 0] }
+  \pdfcompresslevel=9
+\fi
+\else
+\ifx\pdfoutput\undefined
+\else
+  \usepackage{color}
+  \usepackage[unicode,colorlinks,hyperindex,plainpages=false,pdftex,urlcolor=black,linkcolor=black,citecolor=black]{hyperref}
+  \definecolor{links}{rgb}{0,0,0}
+  \definecolor{anchors}{rgb}{0,0,0}
+  \def\AnchorColor{anchors}
+  \def\LinkColor{links}
+  \def\pdfBorderAttrs{/Border [0 0 0] }
+  \pdfcompresslevel=9
+\fi
+\fi
+\usepackage[all]{hypcap}
+
+% Render \paragraph as a display heading (own line, then body below)
+% instead of the default run-in style.
+\usepackage{titlesec}
+\titleformat{\paragraph}[block]
+  {\normalfont\bfseries}{}{0pt}{}
+\titlespacing*{\paragraph}{0pt}{1.2\baselineskip}{0.3\baselineskip}
+
+% Title-page metadata. The VUT logo and faculty styling are kept.
+% Abstract, keywords, declaration are not used in this project report.
+\projectinfo{
+  project={SP},
+  year={2026},
+  date=\today,
+  title.cs={Compute-Aware MoE for Efficient 5G Neural Receivers},
+  title.en={Compute-Aware MoE for Efficient 5G Neural Receivers},
+  author.name={\shortstack[l]{Dominik Huml (xhumld00) \\ Jakub Kontrik (xkontr02) \\ Martin Vaculik (xvaculm00)}},
+  author.surname={},
+  department={UPGM},
+  faculty={FIT},
+  faculty.cs={Fakulta informačních technologií},
+  faculty.en={Faculty of Information Technology},
+  department.cs={Ústav počítačové grafiky a multimédií},
+  department.en={Department of Computer Graphics and Multimedia},
+  keywords.cs={},
+  keywords.en={},
+  abstract.cs={},
+  abstract.en={},
+  declaration={},
+  tocdepth={2}
+}
+
+% Override fitthesis defaults: this is a KNN course project, not a standard
+% "term project", and there is no supervisor row.
+\makeatletter
+\def\@projecttype@EN{KNN project}
+\def\@projecttype@CS{KNN projekt}
+\def\@projecttype@SK{KNN projekt}
+\def\@supervisor@EN{}
+\def\@supervisor@CS{}
+\def\@supervisor@SK{}
+\def\get@supervisor{}
+\def\@supervisor@n{}
+\def\@supervisor@s{}
+\makeatother
+
+\clubpenalty=10000
+\widowpenalty=10000
+
+\newlist{checklist}{itemize}{1}
+\setlist[checklist]{label=$\square$}
+
+% Suppress the abstract page and the declaration/acknowledgement page.
+% The fitthesis \maketitle calls these internally for the thesis frontmatter.
+% We are writing a paper, not a thesis.
+\makeatletter
+\renewcommand\makeabstract{}
+\renewcommand\makedeclaration{}
+\makeatother
+
+\begin{document}
+  \maketitle
+
+  \input{projekt-01-kapitoly-chapters-en}
+
+\makeatletter
+\def\@openbib@code{\addcontentsline{toc}{chapter}{Bibliography}}
+\makeatother
+\bibliographystyle{bib-styles/Pysny/enplain}
+
+  \begin{flushleft}
+  \bibliography{projekt-20-literatura-bibliography}
+  \end{flushleft}
+
+\end{document}

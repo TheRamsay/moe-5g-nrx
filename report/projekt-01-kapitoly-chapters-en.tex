@@ -1,0 +1,276 @@
+% Compute-Aware MoE for 5G Neural Receivers
+% Single chapter with 5 sections.
+% Run-ID and JSON traceability for every claim is in runs.md.
+
+\chapter{Compute-Aware MoE for 5G Neural Receivers}
+\label{chap:main}
+
+\section{Introduction}
+\label{sec:intro}
+
+A 5G physical-layer receiver maps a received OFDM resource grid to soft bit estimates that an outer LDPC decoder then corrects into the transmitted block. Recent work has shown that fully-neural receivers can match or surpass classical signal-processing pipelines, particularly under hardware impairments and fast-varying channels~\cite{honkala2021deeprx,wiesmayr2024nrx}. Their drawback is uniform compute. Every received slot pays the same cost regardless of channel quality. In a deployed cell the channel-quality distribution is heavily skewed. Most slots are easy (high SNR, line-of-sight, low delay spread) and could be decoded by a much smaller model. A minority of hard slots dominate the residual error rate. A static dense receiver therefore wastes energy on the easy majority.
+
+Mixture-of-Experts (MoE) architectures~\cite{shazeer2017outrageously,fedus2022switch} provide a natural mechanism for per-sample adaptive compute. A router selects a subset of experts to run for each input. Prior work on MoE for 5G receivers (MEAN~\cite{vanbolderik2024mean}) used homogeneous experts pre-trained on disjoint SNR ranges, with the gating network trained as a separate stage on top of frozen experts and no explicit compute term in the loss. Channel-aware gating in wireless~\cite{song2025channelaware} motivates joint end-to-end training of the routing module on learned channel-quality features.
+
+Our contribution is a compute-aware neural receiver that combines (i) heterogeneous experts of different capacities, (ii) a channel-aware router driven by features extracted from a shared stem with no oracle SNR access, and (iii) an explicit FLOPs-penalty term in the training loss. The primary metric is the \emph{BLER vs Average FLOPs} Pareto frontier on a held-out test set. We train and evaluate on synthetic 3GPP UMa and TDL-C channels generated with NVIDIA Sionna~\cite{sionna}. The OFDM grid has \num{128} subcarriers and \num{14} symbols, modulation is 16-QAM, and four antennas are used at the receiver.
+
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{Neural receivers for 5G}
+DeepRx~\cite{honkala2021deeprx} and NRX~\cite{wiesmayr2024nrx} establish that fully-neural physical-layer receivers can match or surpass classical pipelines, particularly under hardware impairments and fast-varying channels. Both apply a single dense network uniformly to every received slot, paying the same per-sample compute regardless of channel quality. They serve as the dense neural baselines against which our compute-aware contribution is measured.
+
+\paragraph{Mixture-of-Experts for wireless}
+The closest prior work is MEAN~\cite{vanbolderik2024mean}, a hard-gated MoE for a SIMO neural receiver evaluated on CDL-C. Three design choices differ from ours. (i) MEAN uses \emph{homogeneous} experts (identical four-block architectures), each pre-trained on a disjoint SNR slice. We use \emph{heterogeneous} experts (nano, small, and large at $320$, $695$, and $1\,604$\,M FLOPs respectively) trained jointly on the full SNR range. (ii) MEAN trains the gating network in a separate stage with the experts frozen, on the raw received signal. We train the router end-to-end with the experts and a shared stem, with the router operating on stem-derived features. (iii) MEAN has no explicit compute term in the training objective. Compute savings come purely from the single-expert-active structural constraint. We add an explicit FLOPs penalty in the loss, which lets us trace a Pareto frontier across operating points (Section~\ref{sec:recipe}). Song et al.~\cite{song2025channelaware} formalise the channel-aware gating principle in a broader wireless setting, motivating routing decisions driven by representation-level features rather than raw signal statistics.
+
+\paragraph{Mixture-of-Experts training mechanics}
+The sparse expert formulation is from Shazeer et al.~\cite{shazeer2017outrageously}, with the Switch Transformer~\cite{fedus2022switch} contributing the simplifications we adopt at inference (hard top-1 routing and a load-balance auxiliary). Differentiable routing during training uses Gumbel-Softmax~\cite{jang2017gumbel} with annealed temperature. Our anti-collapse sweep (Section~\ref{sec:recipe}) specifically tests the standard mechanisms from this line of work.
+
+\paragraph{Simulators and data}
+Synthetic 3GPP UMa and TDL-C training and test data are generated with NVIDIA Sionna~\cite{sionna}. The DeepMIMO~\cite{deepmimo} ASU Campus 1 ray-traced scenario provides the out-of-distribution test set used in Section~\ref{sec:scope}.
+
+\section{Architecture}
+\label{sec:arch}
+
+The model has three components. A shared stem extracts channel-quality features. A channel-aware router picks one expert per sample. Three heterogeneous experts produce bit log-likelihood estimates. Figure~\ref{fig:arch} shows the layout.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.95\linewidth]{obrazky-figures/architecture.png}
+\caption{Compute-aware MoE neural receiver. The shared stem is always paid. The router selects exactly one expert per sample at inference. Experts have heterogeneous capacities ($1604$\,M, $695$\,M, and $320$\,M total FLOPs).}
+\label{fig:arch}
+\end{figure}
+
+\paragraph{Shared stem}
+A three-layer 2D~CNN with channels $18 \to 64 \to 64 \to 56$ and $3{\times}3$ convolutions (ReLU activations) maps the per-resource-element input tensor to an internal state at \texttt{state\_dim=56}. The two extra input channels carry pilot-distance features that encode where the LS channel-estimate interpolation is reliable. Total cost is $285$\,M multiply-add FLOPs per slot, paid on every sample.
+
+\paragraph{Channel-aware router}
+A two-layer MLP ($112 \to 64 \to 3$, ReLU) operates on the concatenation of mean-pooled and max-pooled stem features. It produces three categorical logits over the experts. During training the routing is differentiable via Gumbel-Softmax~\cite{jang2017gumbel} with temperature annealed from $1.0$ to $0.5$. At inference the router selects exactly one expert with hard top-1. The router has no access to the true SNR. Routing decisions are driven solely by the learned channel-quality features.
+
+\paragraph{Heterogeneous experts}
+Each expert is a stack of residual bottleneck blocks ($1{\times}1 \to 3{\times}3 \to 1{\times}1$), followed by a bit-LLR readout head and a channel-estimate readout head. The three configurations are listed in Table~\ref{tab:experts}.
+
+\begin{table}[h]
+\centering
+\small
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{l r r r r r}
+\toprule
+Expert & Blocks & Block dim & Readout dim & Total FLOPs & \% of large \\
+\midrule
+nano  & 4 &  8 &  32 & $320$\,M &  20\,\% \\
+small & 8 & 32 &  96 & $695$\,M &  43\,\% \\
+large & 8 & 64 & 128 & $1604$\,M & 100\,\% \\
+\bottomrule
+\end{tabular}
+\caption{Heterogeneous expert configurations. \emph{Total FLOPs} is the sum of the always-paid stem ($285$\,M), the expert backbone, and the two readout heads. Values verified analytically and against the model's logged \texttt{max\_flops} buffer to within $0.01$\,\%.}
+\label{tab:experts}
+\end{table}
+
+The complete model has $\num{582655}$ trainable parameters. Pre-trained dense baselines of equivalent capacity (with $\num{89892}$, $\num{168324}$, and $\num{449540}$ parameters) are used as warm-start sources for the experts in Section~\ref{sec:recipe}.
+
+\paragraph{Training objective}
+The loss combines the bit-level binary cross entropy with a channel-estimate auxiliary, an expected-FLOPs penalty, and a soft load-balance term,
+\[
+\mathcal{L} \;=\; \mathcal{L}_{\mathrm{BCE}}
+  \;+\; \gamma \, \mathcal{L}_{\mathrm{chan}}
+  \;+\; \alpha \, \mathbb{E}_{\mathrm{router}}\!\bigl[\,\widehat{\mathrm{FLOPs}}\,\bigr]
+  \;+\; \beta \, \mathcal{L}_{\mathrm{bal}},
+\]
+where $\widehat{\mathrm{FLOPs}} = \mathrm{FLOPs}/\mathrm{FLOPs}_{\max}$ is the expert FLOPs normalised by the always-\texttt{large} cost. We use $\gamma = 0.05$, $\alpha = 2 \cdot 10^{-3}$ at the final operating point (Section~\ref{sec:recipe} sweeps $\alpha$), and $\beta = 0.1$. The expected-FLOPs term uses the soft routing probabilities at training time. At inference the realised FLOPs are determined by the hard top-1 choice.
+
+\section{Training Recipe}
+\label{sec:recipe}
+
+The compute-aware MoE has two competing failure modes. With a cold start (Phase~1) the FLOPs penalty $\alpha$ pushes the router toward the cheapest experts before \texttt{large} has learned to decode anything, and we observe BLER $0.926$ at $48\,\%$ realised FLOPs. With a full warm-start (Phase~2) \texttt{large} is strictly better at step~$1$, the router locks onto it, and the model becomes a fine-tuned dense receiver at BLER $0.879$ and $100\,\%$ FLOPs. Figure~\ref{fig:trajectories} contrasts the two failure modes against the asymmetric warm-start recipe and shows the corresponding router-entropy trajectories.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.95\linewidth]{obrazky-figures/routing_trajectories_collapse_modes.pdf}
+\caption{Routing trajectories for the three paradigms. Phase~1 abandons \texttt{large} early. Phase~2 collapses to $100\,\%$ \texttt{large}. Only the asym-warm recipe (exp26) maintains exploratory router entropy long enough to reach a heterogeneous policy.}
+\label{fig:trajectories}
+\end{figure}
+
+\paragraph{Anti-collapse mechanisms fail}
+We tested two literature-standard mechanisms across four orders of magnitude each. The Switch Transformer auxiliary loss~\cite{fedus2022switch} was applied at weights $\{10^{-3}, 10^{-2}, 10^{-1}, 10^{0}\}$, and a soft capacity penalty at $\{0.1, 0.5, 2.0, 10.0\}$. None of the eight runs produced both heterogeneous routing and good BLER. Switch aux at every weight collapsed to $100\,\%$ \texttt{large}, as did the capacity penalty at weight $0.1$. The capacity penalty at $0.5$ and $2.0$ produced spread routing at the cost of $+9$\,pp BLER. Our verified Switch-aux run at weight $10^{-3}$ ended with realised FLOPs ratio $1.000$ and \texttt{large} usage $1.000$ on both UMa and TDL-C. Two warmup-based stabilisation variants also failed. A large-warmup recipe (freeze \texttt{nano} and \texttt{small} for the first $2\,000$ steps) over-corrected to $100\,\%$ \texttt{large} in three of three seeds. A $\beta$-warmup recipe (start with $\beta = 0.5$ for $4\,000$ steps then drop to $0.1$) gave three different routing patterns with mean TDL-C BLER $0.936 \pm 0.043$, worse than the no-warmup baseline.
+
+\paragraph{Asymmetric warm-start with cold-\texttt{large}.}
+Our recipe warm-starts the stem and the two smaller experts (\texttt{nano}, \texttt{small}) from pre-trained dense baselines while leaving \texttt{large} at random initialisation. \texttt{large} has no initial advantage and must \emph{earn} router traffic by training. The trajectory (Figure~\ref{fig:wakeup}) shows that cold \texttt{large} initially captures most routing for the first $\sim 700$ steps. By step $\sim 1\,500$ the warm-started \texttt{nano} has grown to match it and the FLOPs penalty starts pushing the router toward cheaper experts. \texttt{small} joins around step $\sim 1\,700$. From step $\sim 3\,000$ onward the routing stabilises in a heterogeneous policy with all three experts active.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.92\linewidth]{obrazky-figures/expert_usage_asym_warm.pdf}
+\caption{Expert routing share (EMA) for exp26. Cold-initialised \texttt{large} dominates briefly at the start, then drops as the FLOPs penalty pushes the router toward the warm-started \texttt{nano} and \texttt{small}. From step $\sim 3\,000$ onward the routing is stably heterogeneous across all three experts.}
+\label{fig:wakeup}
+\end{figure}
+
+\paragraph{Why cold-\texttt{large} specifically.}
+We ran a symmetric sweep that cold-initialises \texttt{small} (exp56) or \texttt{nano} (exp57) instead. Cold-\texttt{small} produces heterogeneous routing but at higher cost, with average FLOPs $67\,\%$ and validation BLER $0.897$. Cold-\texttt{nano} collapses to $100\,\%$ \texttt{large} (validation BLER $0.887$, FLOPs $100\,\%$, \texttt{nano} and \texttt{small} usage on the order of $10^{-15}$). Only when the highest-capacity expert is the cold one does the router commit to smaller experts before \texttt{large} becomes competent.
+
+\paragraph{The $\alpha$ sweep on the test set}
+Table~\ref{tab:alpha} reports test-set BLER and average realised FLOPs for the four operating points (each $32\,768$ samples per profile). The knee of the Pareto curve sits at $\alpha = 2 \cdot 10^{-3}$.
+
+\begin{table}[h]
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{l c r r r l}
+\toprule
+Run & $\alpha$ & UMa BLER & TDLC BLER & Avg FLOPs & TDLC routing (l/n/s) \\
+\midrule
+Dense large baseline & n/a & $0.936$ & $0.866$ & $100\,\%$ & n/a \\
+exp24 & $5{\cdot}10^{-4}$ & $0.936$ & $0.861$ & $100\,\%$ & $100/0/0$ \\
+exp25 & $1{\cdot}10^{-3}$ & $0.938$ & $0.875$ & $56\,\%$ & $44/12/44$ \\
+\textbf{exp26} & $\mathbf{2{\cdot}10^{-3}}$ & $\mathbf{0.937}$ & $\mathbf{0.867}$ & $\mathbf{56\,\%}$ & $\mathbf{44/15/40}$ \\
+exp27 & $5{\cdot}10^{-3}$ & $0.940$ & $0.881$ & $60\,\%$ & $37/0/63$ \\
+\bottomrule
+\end{tabular}
+\caption{Alpha sweep on the locked test set. Average realised FLOPs is taken over UMa+TDLC, normalised to the always-\texttt{large} cost ($1\,604$\,M). exp24 collapses to large, exp27 starves \texttt{nano}.}
+\label{tab:alpha}
+\end{table}
+
+\paragraph{Channel-aware features are load-bearing}
+To check that the router is actually using the stem's channel-quality features and not just architectural priors, we replaced the router's input with fresh Gaussian noise per forward pass while keeping the rest of exp26 unchanged. Test-set BLER rises to $0.968$ (a $+6.6$\,pp loss versus exp26), and the router collapses to $89\,\%$ \texttt{small} with $0\,\%$ \texttt{large} usage. The channel-quality input is the active mechanism, not the architecture or the loss terms alone.
+
+\paragraph{Linear probes confirm the stem encodes profile-specific channel features}
+We trained linear probes on pooled stem features against ground-truth channel labels. On TDL-C the SNR probe achieves $R^2 = 0.93$ and the delay-spread probe $R^2 = 0.65$, so the stem strongly captures both. On UMa the SNR probe is much weaker ($R^2 = 0.42$) because UMa decodability depends on geometry, not SNR alone. A profile-classification probe (UMa vs TDL-C from stem features) reaches $77.9\,\%$ accuracy. The stem learns profile-specific channel-quality representations rather than a universal SNR encoder, which matches the per-profile differences in routing share.
+
+
+\paragraph{Recipe stability is bimodal}
+Re-running exp26 with seeds $\{32, 42\}$ gave one reproduction (s$42$, average validation BLER $0.905$) and one collapse (s$32$, average test BLER $0.958$, large abandoned). At $100$k samples the same $\alpha = 2 \cdot 10^{-3}$ recipe collapses for both s$67$ and s$42$. Scaling $\alpha$ inversely to $1 \cdot 10^{-3}$ (exp60) recovers exp26-quality at $100$k, with average test BLER $0.9013$ at $58\,\%$ FLOPs. The controllable knob is the $\alpha$ to data ratio. Recipe stability at fixed $\alpha$ remains an open problem.
+
+\section{Training-Scaffold Finding}
+\label{sec:scaffold}
+
+The exp26 model has three experts active in routing, but a closer look reveals that only one of them ever successfully decodes a block. We exploit this to derive a deployment recipe that beats the trained model on FLOPs at no BLER cost, with no retraining required.
+
+\paragraph{Per-expert success rate}
+For each routed sample we record whether the assigned expert produced a successfully decoded block. Across about $8\,000$ test samples, \texttt{nano} succeeds on $0\,\%$ of its routed samples (UMa $n{=}1974$, TDL-C $n{=}609$). \texttt{small} also succeeds on $0\,\%$ (UMa $n{=}979$, TDL-C $n{=}1559$). Only \texttt{large} ever decodes successfully, on $23.2\,\%$ of UMa-routed samples ($n{=}1047$) and $29.4\,\%$ of TDL-C-routed samples ($n{=}1832$). Figure~\ref{fig:specialization} contrasts where the router sends samples (left panel) with whether the chosen expert ever decodes them (right panel). The router uses all three experts in clear proportions, but only \texttt{large}'s success rate is non-zero.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{obrazky-figures/router_mechanism_expert_specialization.pdf}
+\caption{The training-scaffold finding in two panels. \emph{Left:} routing share per profile shows the router uses all three experts. \emph{Right:} block-success rate per expert on routed samples shows only \texttt{large} ever decodes. \texttt{nano} and \texttt{small} are routed to but never produce a successful block.}
+\label{fig:specialization}
+\end{figure}
+
+\paragraph{Why does the router send work to \texttt{small} at all.}
+For each test sample we forced every expert to decode it (counterfactual analysis). On the samples the router actually sent to \texttt{small} (UMa, $n{=}979$), the per-expert pre-LDPC BER is essentially identical across all three experts: \texttt{nano} $0.237$, \texttt{small} $0.230$, \texttt{large} $0.231$, with BLER $1.000$ in every case. The router does not send work to \texttt{small} because \texttt{small} can decode. It sends work because \emph{no} expert can decode, and \texttt{small} matches \texttt{large}'s partial-decode quality at $43\,\%$ of the FLOPs. The pre-LDPC BER of $0.23$ is well above the typical 5G-NR LDPC correction threshold of $5$--$10\,\%$, so the block fails at FEC, HARQ retransmission is requested, and \texttt{small}'s partial output is discarded. The router's value here is compute optimisation on hopeless samples, not partial recovery via \texttt{small}.
+
+\paragraph{Mode B substitutes \texttt{small} with a zero-output sink at inference.}
+If \texttt{small}'s contribution to the deployed BLER is zero, we should not pay its compute. We replace its expert head with a constant zero output and charge zero FLOPs whenever the router selects \texttt{small}. No retraining is performed. The router and the other two experts are untouched. Table~\ref{tab:modeb} reports the result across the $\alpha$ sweep.
+
+\begin{table}[h]
+\centering
+\small
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{l c c c c c}
+\toprule
+ & \multicolumn{2}{c}{Avg BLER} & & \multicolumn{2}{c}{Avg FLOPs} \\
+\cmidrule(lr){2-3}\cmidrule(lr){5-6}
+Checkpoint & base & Mode B & $\Delta$ & base & \textbf{Mode B} \\
+\midrule
+exp25 ($\alpha\,{=}\,10^{-3}$)         & $0.9063$ & $0.9066$ & $+0.0003$ & $56.0\,\%$ & $\mathbf{46.7\,\%}$ \\
+\textbf{exp26} ($\alpha\,{=}\,2{\cdot}10^{-3}$) & $\mathbf{0.9021}$ & $\mathbf{0.9021}$ & $\mathbf{0.0000}$ & $55.8\,\%$ & $\mathbf{47.3\,\%}$ \\
+exp27 ($\alpha\,{=}\,5{\cdot}10^{-3}$)        & $0.9107$ & $0.9116$ & $+0.0009$ & $60.0\,\%$ & $\mathbf{41.9\,\%}$ \\
+\bottomrule
+\end{tabular}
+\caption{Mode B inference. On the headline operating point (exp26) BLER is bit-identical to four decimals, and FLOPs drops by $8.5$\,pp. Across all three $\alpha$ values BLER drift stays at or below $10^{-3}$.}
+\label{tab:modeb}
+\end{table}
+
+Figure~\ref{fig:pareto} places these operating points on the BLER vs FLOPs plane against the dense neural ladder and the classical LMMSE LS-MRC reference.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.92\linewidth]{obrazky-figures/report_pareto.pdf}
+\caption{Pareto frontier on the locked test set. Dense neural baselines (blue squares) trade BLER for FLOPs. The trained MoE $\alpha$-sweep (open circles) lands near dense\_large at $56\,\%$ FLOPs. Mode B (orange diamonds) shifts those checkpoints leftward at near-zero BLER cost. \textbf{exp26 + Mode B (star) matches dense\_large's BLER at $47.3\,\%$ FLOPs.} LMMSE LS-MRC (dotted) is the classical reference (no neural FLOPs).}
+\label{fig:pareto}
+\end{figure}
+
+\paragraph{Why \texttt{small} is needed at training even though it never decodes at inference.}
+The natural objection is that if \texttt{small} contributes zero successful blocks, training with it is wasted. We tested this directly. exp41 dropped \texttt{small} from the architecture entirely and trained $\{\texttt{nano}, \texttt{large}\}$ under the same recipe. Validation average BLER rises to $0.955$, a $+5.3$\,pp loss against exp26's matched-protocol validation BLER of $0.902$. Removing \texttt{small} from training is far more harmful than removing it at inference, where Mode B causes no BLER loss at all. \texttt{small} provides a gradient signal during training (through the channel-MSE auxiliary on partial-decode samples) that lets the router learn to identify hopeless samples it can route to \texttt{nano}. Once the router has learned that decision boundary, the \texttt{small} expert head itself is dispensable.
+
+\paragraph{\texttt{nano} is also load-bearing.}
+The symmetric ablation drops \texttt{nano} and trains a 2-expert MoE with \texttt{small} and \texttt{large} only. It gives test BLER $0.909$ at $65\,\%$ realised FLOPs, a cost of $+0.7$\,pp BLER and $+9$\,pp FLOPs versus exp26. \texttt{nano} absorbs the hopeless low-SNR samples that would otherwise burn \texttt{small}'s compute, so dropping it costs much more in compute than in BLER. The two ablations together justify the 3-expert design at the operating point we report.
+
+\paragraph{Sink as a real expert breaks training}
+The natural counterfactual is to train with a zero-output expert in place of \texttt{small} from the start. It does not work. We tried three architectures. With sink, channel-only, and large, training ends with \texttt{large} usage $92\,\%$ on TDL-C and average realised FLOPs $82\,\%$. With sink, small, and large, training collapses entirely to all-sink at step $500$ and produces constant-zero outputs (validation BCE saturates at $\ln 2 \approx 0.69$, the zero-output regime, logged validation loss is $\sim 0.72$--$0.74$ once the channel-MSE auxiliary is included, BLER $1.0$). With sink, nano, and large, training is stable but ends $7$\,pp BLER worse than exp26. The sink is too attractive under any non-trivial $\alpha$ to be present during training, but it works as a post-hoc substitution at deployment.
+
+\paragraph{Reframing}
+The compute-aware MoE is best understood as one decoder (\texttt{large}) plus two intelligent compute-skip mechanisms. \texttt{nano} provides a cheap fail on hopeless samples. \texttt{small} provides a training-time scaffold for routing-policy gradient signal that can be discarded at deployment. The headline contribution is the deployment recipe \emph{exp26 + Mode B}, which achieves average BLER $0.9021$ at $47.3\,\%$ of dense-large FLOPs with no retraining. This is a clean Pareto improvement over the trained MoE itself.
+
+\section{Honest Scope and Discussion}
+\label{sec:scope}
+
+The contribution above is positioned strictly against a dense neural baseline. We complement it with three honest scope statements so the reader can place the work correctly.
+
+\paragraph{Full baseline landscape}
+For a fair compute-vs-quality comparison we evaluated three classical baselines and three dense neural baselines of varying capacity on the same locked test set ($32\,768$ samples per profile). Table~\ref{tab:baselines} reports the full landscape.
+
+\begin{table}[h]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{l l r r r r}
+\toprule
+Baseline & Channel info & Avg BLER & UMa & TDL-C & Avg FLOPs \\
+\midrule
+Single-antenna           & none      & $0.9950$ & $0.9922$ & $0.9978$ & n/a \\
+LMMSE Genie-MRC (oracle) & true H    & $\mathbf{0.8544}$ & $0.9084$ & $0.8003$ & n/a \\
+LMMSE LS-MRC             & LS pilots & $0.8997$ & $0.9388$ & $0.8607$ & n/a \\
+\midrule
+dense\_nano  & LS+net    & $0.951$  & $0.961$  & $0.941$  & $320$\,M \\
+dense\_small & LS+net    & $0.931$  & $0.951$  & $0.911$  & $695$\,M \\
+dense\_large & LS+net    & $0.901$  & $0.936$  & $0.866$  & $1604$\,M \\
+\midrule
+\textbf{exp26 + Mode B (ours)} & LS+net & $\mathbf{0.9021}$ & $0.937$ & $0.867$ & $\mathbf{759}$\,M \\
+\bottomrule
+\end{tabular}
+\caption{All baselines on the same locked test set. Single-antenna is a no-MIMO floor. Genie-MRC needs oracle channel knowledge and is not deployable. LMMSE LS-MRC is the realistic classical baseline. exp26 + Mode B matches dense\_large's BLER at FLOPs close to dense\_small.}
+\label{tab:baselines}
+\end{table}
+
+The dense capacity ladder shows that exp26 + Mode B achieves dense\_large's BLER at $\sim 47\,\%$ of its FLOPs, roughly the cost of dense\_small ($43\,\%$). Compared with classical baselines, exp26 + Mode B beats single-antenna detection by a wide margin and ties dense\_large against LS-MRC LMMSE (the realistic classical reference). Genie-MRC LMMSE remains the BLER ceiling and serves as an upper bound for what any LS-pilot receiver can achieve. Our contribution is positioned strictly inside the neural-receiver design space, which is the regime where adaptive compute provides value. On the TDL-C waterfall the realistic LMMSE LS-MRC is uniformly better than both neural models between $14$ and $20$\,dB SNR, shown in Table~\ref{tab:lmmse-snr}.
+
+
+On three additional 3GPP in-family OOD profiles (TDL-A, TDL-D, CDL-A, $32\,768$ samples each), exp26 averages $0.825$ and dense\_large averages $0.825$. LMMSE wins on each of these in-family profiles in our prior runs.
+
+\paragraph{An oracle-SNR cascade is a tighter Pareto reference}
+Beyond the dense ladder we compare against a hand-rule cascade that uses true SNR (an upper bound on what learned routing could achieve, not deployable in practice). The cascade picks the cheapest expert whose per-SNR BLER on a held-out calibration split is within a tolerance of dense\_large's BLER at the same SNR. At tolerance $+0.01$--$0.02$ it reaches BLER $0.900$ at $49\,\%$ FLOPs, slightly dominating exp26's learned routing ($0.902$ at $56\,\%$). At tolerance $+0.05$ it reaches $0.909$ at $35\,\%$, and at $+0.10$, $0.919$ at $27\,\%$. exp26 sits on the Pareto frontier without oracle SNR access. A single ablation feeding signal-derived SNR statistics (received power, channel power, channel variance) directly to the router (exp38) collapsed to $100\,\%$ \texttt{large}, suggesting the implicit stem features already capture what an explicit SNR proxy would add and that raw statistics on top are destabilising.
+
+\paragraph{Where neural narrowly wins}
+UMa shows the opposite pattern from TDL-C. The three receivers tie within $1$\,pp at low and mid SNR, and at SNR $\geq 20.5$\,dB the neural decoders narrowly beat LMMSE (right half of Table~\ref{tab:lmmse-snr}). A per-sample crosstab on UMa ($n{=}32\,768$, agreement $98.1\,\%$) gives exp26 a net $+64$ wins over LMMSE ($336$ NN-only against $272$ LMMSE-only). The NN-favoured subset has notably weaker MIMO geometry (mean spatial max-eigenvalue $2.07$ against $3.22$, channel power $0.56$ against $0.89$). The learned representation pays off when LMMSE-MRC's small-angle-spread or well-conditioned-MIMO assumption breaks. On TDL-C the same crosstab shows LMMSE net $+220$ wins with no clean NN-favoured regime.
+
+\begin{table}[h]
+\centering
+\small
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{c c c c | c c c c}
+\toprule
+\multicolumn{4}{c|}{TDL-C waterfall} & \multicolumn{4}{c}{UMa high-SNR} \\
+SNR (dB) & LMMSE & dense\_large & exp26 & SNR (dB) & LMMSE & dense\_large & exp26 \\
+\midrule
+$14.0$--$15.5$ & $\mathbf{0.7050}$ & $0.7069$ & $0.7265$ & $14.5$--$16.0$ & $\mathbf{0.9047}$ & $0.9162$ & $0.9168$ \\
+$15.5$--$17.0$ & $\mathbf{0.3213}$ & $0.3722$ & $0.3697$ & $17.5$--$19.0$ & $\mathbf{0.8443}$ & $\mathbf{0.8443}$ & $0.8449$ \\
+$17.0$--$18.5$ & $\mathbf{0.1324}$ & $0.1850$ & $0.1745$ & $20.5$--$22.0$ & $0.8100$ & $0.7981$ & $\mathbf{0.7856}$ \\
+$18.5$--$20.0$ & $\mathbf{0.0502}$ & $0.0698$ & $0.0851$ & $22.0$--$23.5$ & $0.7825$ & $\mathbf{0.7551}$ & $0.7651$ \\
+                &                  &          &          & $23.5$--$25.0$ & $0.7629$ & $\mathbf{0.7320}$ & $0.7423$ \\
+\bottomrule
+\end{tabular}
+\caption{Per-SNR BLER, $32\,768$ samples per profile. \emph{Left:} LMMSE wins TDL-C uniformly with $2$--$3$\,dB SNR slack. \emph{Right:} on UMa the three receivers tie at low and mid SNR. Neural narrowly wins at SNR $\geq 20.5$\,dB by $1$--$3$\,pp.}
+\label{tab:lmmse-snr}
+\end{table}
+
+\paragraph{Out-of-distribution behaviour on ray-traced channels}
+On DeepMIMO ASU Campus 1 ray-traced channels all neural decoders fail (dense\_large $0.9901$, exp26 $0.9915$, both at $\sim 32\,\%$ FLOPs because the router defaults to \texttt{nano}). Figure~\ref{fig:pca-ood} shows the mechanism. In the stem-feature PCA basis fitted on in-distribution UMa+TDL-C, ASU samples form a tight off-centroid cluster with only $20\,\%$ inside the one-sigma in-distribution box. The router was never trained on features in that region of the manifold and falls back to its cheapest expert. A few-shot fine-tune ($2\,048$ ASU samples, $500$ steps) did not recover (post-FT BLER unchanged to four decimals), and in-distribution metrics and routing are bit-identical pre and post fine-tune. As a control, LMMSE on a different ray-traced scenario (DeepMIMO O1) reaches $0.976$ against dense\_large $0.982$ and exp26 $0.984$. Classical LMMSE is the only receiver that comes close on ray-traced channels, so the gap is not channel difficulty but learned synthetic priors actively misleading the neural decoder. Closing the gap requires longer fine-tuning, a larger OOD slice, or domain-randomised pre-training, all out of scope here.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.78\linewidth]{obrazky-figures/pca_ood_overlay.pdf}
+\caption{Stem-feature PCA-2D fitted on in-distribution UMa+TDL-C. ASU ray-traced samples (orange) projected onto the same basis collapse into a narrow off-centroid cluster (only $20\,\%$ inside the in-distribution one-sigma box), explaining the router's \texttt{nano} default on OOD.}
+\label{fig:pca-ood}
+\end{figure}
+
+\paragraph{Conclusion}
+We presented a compute-aware MoE neural receiver. Per-expert success-rate analysis and counterfactual routing showed that the middle expert never decodes a block. Replacing it with a zero-output sink at inference (Mode B) preserves BLER bit-identically while saving $8.5$\,pp of FLOPs across the $\alpha$ sweep, with no retraining. The contribution is a training-scaffold interpretation of compute-aware MoE: diverse experts are needed at training time for routing-policy gradient signal, but the non-decoding middle expert can be pruned at deployment. Open problems include recipe stability at $\alpha = 2 \cdot 10^{-3}$ (reproduces in $2$ of $3$ seeds) and OOD transfer to ray-traced channels.
