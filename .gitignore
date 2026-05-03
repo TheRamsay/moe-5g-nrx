@@ -4,6 +4,7 @@
 __pycache__/
 *.pyc
 .DS_Store
+.claude/
 
 # Weights & Biases local logs at repo root
 /wandb/
