@@ -22,7 +22,7 @@ router:
     use_input_statistics: false
 
 # Wider expert range: nano/small/large (block_dim 8/32/64)
-# state_dim=32 throughout — stem is the bottleneck, not the backbone
+# state_dim=56 throughout; the stem is the always-paid bottleneck
 experts:
     nano:
         num_cnn_blocks: 4

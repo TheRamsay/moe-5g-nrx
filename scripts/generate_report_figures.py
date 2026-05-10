@@ -121,7 +121,7 @@ def plot_architecture() -> None:
     ax.text(0.70, 0.47, "Gumbel-Softmax train\nhard top-1 inference", color=C.HEADLINE, fontsize=8.5)
     ax.text(0.03, 0.34, "one expert\nruns per slot", color="#666666", fontsize=8.5)
 
-    save_figure(fig, "report_architecture", report_stem="architecture")
+    save_figure(fig, "report_architecture")
     plt.close(fig)
 
 
@@ -136,15 +136,15 @@ def plot_pareto() -> None:
         ("dense_large", 100.0, 0.901, C.DENSE_LARGE),
     ]
     moe_base = [
-        ("exp24", 100.0, 0.898),
-        ("exp25", 56.0, 0.906),
-        ("exp26", 55.8, 0.902),
-        ("exp27", 60.0, 0.911),
+        ("alpha 5e-4", 100.0, 0.898),
+        ("alpha 1e-3", 56.0, 0.906),
+        ("selected MoE", 55.8, 0.902),
+        ("alpha 5e-3", 60.0, 0.911),
     ]
     mode_b = [
-        ("exp25 + B", 46.7, 0.9066),
-        ("exp26 + B", 47.3, 0.9021),
-        ("exp27 + B", 41.9, 0.9116),
+        ("alpha 1e-3 + B", 46.7, 0.9066),
+        ("selected MoE + B", 47.3, 0.9021),
+        ("alpha 5e-3 + B", 41.9, 0.9116),
     ]
 
     ax.plot([x for _, x, _, _ in dense], [y for _, _, y, _ in dense], color=C.DENSE_NANO, alpha=0.45, lw=1.5)
@@ -165,11 +165,11 @@ def plot_pareto() -> None:
         zorder=4,
     )
     ax.scatter(55.8, 0.902, s=85, marker="o", color=C.NEUTRAL_GREY, edgecolor="white", linewidth=1.0, zorder=6)
-    ax.annotate("exp26\ntrained MoE", (55.8, 0.902), xytext=(8, -20), textcoords="offset points", fontsize=8.5)
+    ax.annotate("selected MoE", (55.8, 0.902), xytext=(8, -20), textcoords="offset points", fontsize=8.5)
 
     ax.scatter(
-        [x for label, x, _ in mode_b if label != "exp26 + B"],
-        [y for label, _, y in mode_b if label != "exp26 + B"],
+        [x for label, x, _ in mode_b if label != "selected MoE + B"],
+        [y for label, _, y in mode_b if label != "selected MoE + B"],
         s=52,
         marker="D",
         color=C.HEADLINE,
@@ -180,7 +180,7 @@ def plot_pareto() -> None:
     )
     ax.scatter(47.3, 0.9021, s=260, marker="*", color=C.HEADLINE, edgecolor="white", linewidth=1.1, zorder=8)
     ax.annotate(
-        "exp26 + Mode B\n0.902 BLER, 47% FLOPs",
+        "MoE + Mode B\n0.902 BLER, 47% FLOPs",
         (47.3, 0.9021),
         xytext=(-18, 26),
         textcoords="offset points",

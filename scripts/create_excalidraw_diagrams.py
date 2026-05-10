@@ -344,7 +344,7 @@ def build_problem_io() -> None:
         72,
         122,
         "The neural receiver maps a noisy 5G resource grid to soft bit estimates. "
-        "BLER is measured after LDPC decoding.",
+        "BLER is measured directly on thresholded bit logits.",
         size=20,
         w=760,
         color="#495057",
@@ -397,8 +397,8 @@ def build_problem_io() -> None:
     s.text(966, 532, "outputs 7168 soft bit LLRs", size=17, w=260, align="center", color="#5f3dc4")
     s.arrow([(1098, 570), (1098, 645)], color="#343a40", width=3)
     s.rect(940, 645, 305, 88, stroke="#343a40", bg="#e6fcf5", stroke_width=2)
-    s.text(987, 666, "LDPC decoder", size=22, w=210, align="center", bold=True)
-    s.text(985, 704, "block success or failure", size=16, w=220, align="center", color="#087f5b")
+    s.text(966, 666, "block-error check", size=21, w=250, align="center", bold=True)
+    s.text(985, 704, "any bit wrong means error", size=16, w=220, align="center", color="#087f5b")
 
     # Callout with exact dimensions.
     s.rect(84, 520, 535, 165, stroke="#868e96", bg="#ffffff", stroke_width=1, roughness=0.6)
@@ -588,7 +588,7 @@ def build_mode_b() -> None:
 
     # Result badge.
     s.rect(390, 625, 520, 70, stroke="#0b7285", bg="#e3fafc", stroke_width=3)
-    s.text(420, 643, "exp26 + Mode B", size=24, w=185, align="center", bold=True, color="#0b7285")
+    s.text(420, 643, "MoE + Mode B", size=24, w=185, align="center", bold=True, color="#0b7285")
     s.text(625, 641, "BLER 0.9021   at   47.3% dense-large FLOPs", size=22, w=260, align="center", color="#0b7285")
 
     s.save("mode_b_deployment_takeaway.excalidraw")
@@ -673,8 +673,8 @@ def build_poster_main() -> None:
     s.text(750, 775, "7168 values", size=16, w=140, align="center", color="#087f5b")
     s.arrow([(720, 760), (615, 760)], color="#343a40", width=3)
     s.rect(455, 720, 160, 82, stroke="#087f5b", bg="#e6fcf5", stroke_width=2)
-    s.text(492, 738, "LDPC", size=23, w=90, align="center", color="#087f5b")
-    s.text(472, 775, "BLER metric", size=16, w=125, align="center", color="#087f5b")
+    s.text(484, 738, "BLER", size=23, w=105, align="center", color="#087f5b")
+    s.text(468, 775, "any bit wrong", size=16, w=132, align="center", color="#087f5b")
 
     # Bottom comparison strip.
     s.line([(95, 865), (1530, 865)], color="#ced4da", width=2, opacity=90)
@@ -690,7 +690,7 @@ def build_poster_main() -> None:
     s.rect(660, 876, 190, 56, stroke="#0b7285", bg="#e3fafc", stroke_width=2)
     s.text(686, 890, "route per slot", size=18, w=135, align="center", color="#0b7285")
     s.arrow([(850, 904), (1040, 904)], color="#0b7285", width=4, opacity=90)
-    s.text(1060, 890, "exp26 + Mode B: 0.9021 BLER at 47.3% FLOPs", size=19, w=430, color="#0b7285")
+    s.text(1060, 890, "MoE + Mode B: 0.9021 BLER at 47.3% FLOPs", size=19, w=430, color="#0b7285")
 
     s.save("poster_main_polished.excalidraw")
 

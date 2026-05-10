@@ -176,7 +176,7 @@ class SionnaNRXSimulator:
 
     def _known_pilot_symbol(self) -> np.complex64:
         # 16-QAM symbol for 0000 under this mapper: (-3 - 3j) / sqrt(10)
-        return np.complex64((-3.0 - 3.0j) / np.sqrt(10.0))  # TODO: correct??
+        return np.complex64((-3.0 - 3.0j) / np.sqrt(10.0))
 
     def _stamp_known_pilot_bits(
         self,

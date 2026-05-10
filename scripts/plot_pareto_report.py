@@ -99,9 +99,9 @@ ax.scatter(
     label=r"Trained MoE ($\alpha$ sweep, baseline inference)",
 )
 
-# exp26 baseline: filled, slightly bigger
+# Selected MoE baseline: filled, slightly bigger
 ax.scatter(55.8, 0.902, marker="o", s=110, color=C_TRAINED, edgecolors="white", linewidths=1.5, zorder=7)
-ax.annotate("exp26 (trained MoE)", (55.8, 0.902), xytext=(10, 6), textcoords="offset points", fontsize=9, color="#444")
+ax.annotate("selected MoE", (55.8, 0.902), xytext=(10, 6), textcoords="offset points", fontsize=9, color="#444")
 
 # Mode B sweep
 mode_b = [
@@ -122,7 +122,7 @@ ax.scatter(
     label="Trained MoE + Mode B inference",
 )
 
-# Mode B headline (exp26 + B)
+# Mode B headline
 ax.scatter(
     47.3,
     0.902,
@@ -132,10 +132,10 @@ ax.scatter(
     edgecolors="white",
     linewidths=1.5,
     zorder=10,
-    label="exp26 + Mode B (ours, no retraining)",
+    label="MoE + Mode B (ours, no retraining)",
 )
 ax.annotate(
-    "exp26 + Mode B",
+    "MoE + Mode B",
     (47.3, 0.902),
     xytext=(-14, 18),
     textcoords="offset points",
