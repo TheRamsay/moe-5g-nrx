@@ -32,7 +32,9 @@ Synthetic 3GPP UMa and TDL-C training and test data are generated with NVIDIA Si
 \section{Architecture}
 \label{sec:arch}
 
-The model has three components. A shared stem extracts channel-quality features. A channel-aware router picks one expert per sample. Three heterogeneous experts produce bit log-likelihood estimates. Figure~\ref{fig:arch} shows the layout.
+The model has three components. A shared stem extracts channel-quality features, a channel-aware router picks one expert per sample, and three heterogeneous expert heads produce bit log-likelihood estimates. Figure~\ref{fig:arch} shows the layout.
+
+Each slot is a $128 \times 14$ resource grid encoded as $16$ input channels from received samples and LS channel estimates, using real and imaginary parts over four antennas. The model appends two pilot-distance maps and outputs $4 \times 128 \times 14 = 7168$ bit LLRs, evaluated as BLER after decoding.
 
 \begin{figure}[h]
 \centering
