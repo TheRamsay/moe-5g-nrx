@@ -25,9 +25,15 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.data import build_cached_dataloader  # noqa: E402
 from src.models import build_model_from_config  # noqa: E402
 
+DEFAULT_CHECKPOINT = "knn_moe-5g-nrx/moe-5g-nrx/model-moe_alphasweep_asym_a2e3_s67-t6lkdep2:best"
+DEFAULT_UMA_PATH = Path("/storage/brno2/home/ramsay/moe-5g-datasets/dense-v1/test/uma.pt")
+DEFAULT_TDLC_PATH = Path("/storage/brno2/home/ramsay/moe-5g-datasets/dense-v1/test/tdlc.pt")
+DEFAULT_ASU_PATH = Path("/storage/brno2/home/ramsay/moe-5g-datasets/deepmimo-train/asu_campus1/asu_campus1")
+
 
 def _download_artifact(ref: str) -> Path:
     import wandb
+
     api = wandb.Api()
     art = api.artifact(ref, type="model")
     art_dir = Path(art.download(root=f"/tmp/wandb_oodpca/{ref.replace('/', '_').replace(':', '_')}"))
@@ -39,8 +45,10 @@ def _download_artifact(ref: str) -> Path:
 def collect_stem_features(model, loader, device, max_samples):
     model.eval()
     captured = {}
+
     def hook(_m, _i, output):
         captured["s"] = output
+
     handle = model.stem.register_forward_hook(hook)
     feats = []
     n = 0
@@ -60,10 +68,10 @@ def collect_stem_features(model, loader, device, max_samples):
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--checkpoint", default="knn_moe-5g-nrx/moe-5g-nrx/model-moe_alphasweep_asym_a2e3_s67-t6lkdep2:best")
-    ap.add_argument("--uma-path", type=Path, default=Path("/storage/brno2/home/ramsay/moe-5g-datasets/dense-v1/test/uma.pt"))
-    ap.add_argument("--tdlc-path", type=Path, default=Path("/storage/brno2/home/ramsay/moe-5g-datasets/dense-v1/test/tdlc.pt"))
-    ap.add_argument("--asu-path", type=Path, default=Path("/storage/brno2/home/ramsay/moe-5g-datasets/deepmimo-train/asu_campus1/asu_campus1"))
+    ap.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT)
+    ap.add_argument("--uma-path", type=Path, default=DEFAULT_UMA_PATH)
+    ap.add_argument("--tdlc-path", type=Path, default=DEFAULT_TDLC_PATH)
+    ap.add_argument("--asu-path", type=Path, default=DEFAULT_ASU_PATH)
     ap.add_argument("--max-samples", type=int, default=2000)
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", type=Path, default=Path("docs/figures"))
@@ -96,14 +104,41 @@ def main() -> int:
     proj = {name: (f - mu) @ basis for name, f in feats.items()}
 
     # Save numpy bundle for later re-plotting if needed.
-    np.savez(args.out / "pca_ood_overlay.npz",
-             uma_proj=proj["uma"], tdlc_proj=proj["tdlc"], asu_proj=proj["asu"],
-             basis=basis, mu=mu)
+    np.savez(
+        args.out / "pca_ood_overlay.npz",
+        uma_proj=proj["uma"],
+        tdlc_proj=proj["tdlc"],
+        asu_proj=proj["asu"],
+        basis=basis,
+        mu=mu,
+    )
 
     fig, ax = plt.subplots(figsize=(7.5, 5.5))
-    ax.scatter(proj["uma"][:, 0],  proj["uma"][:, 1],  s=6, alpha=0.45, color="#56B4E9", label=f"UMa (in-dist, n={len(proj['uma'])})")
-    ax.scatter(proj["tdlc"][:, 0], proj["tdlc"][:, 1], s=6, alpha=0.45, color="#0072B2", label=f"TDL-C (in-dist, n={len(proj['tdlc'])})")
-    ax.scatter(proj["asu"][:, 0],  proj["asu"][:, 1],  s=8, alpha=0.55, color="#D55E00", marker="x", label=f"ASU ray-traced (OOD, n={len(proj['asu'])})")
+    ax.scatter(
+        proj["uma"][:, 0],
+        proj["uma"][:, 1],
+        s=6,
+        alpha=0.45,
+        color="#56B4E9",
+        label=f"UMa (in-dist, n={len(proj['uma'])})",
+    )
+    ax.scatter(
+        proj["tdlc"][:, 0],
+        proj["tdlc"][:, 1],
+        s=6,
+        alpha=0.45,
+        color="#0072B2",
+        label=f"TDL-C (in-dist, n={len(proj['tdlc'])})",
+    )
+    ax.scatter(
+        proj["asu"][:, 0],
+        proj["asu"][:, 1],
+        s=8,
+        alpha=0.55,
+        color="#D55E00",
+        marker="x",
+        label=f"ASU ray-traced (OOD, n={len(proj['asu'])})",
+    )
 
     ax.set_xlabel("PC 1 (in-distribution basis)")
     ax.set_ylabel("PC 2 (in-distribution basis)")

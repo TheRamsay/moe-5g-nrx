@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import numpy as np
+
 import wandb
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -33,9 +33,7 @@ def main() -> int:
     print("[INFO] fetching exp26 history...", file=sys.stderr)
     api = wandb.Api()
     run = api.run(f"{ENTITY}/{PROJECT}/{RUN}")
-    keys = ["train/ema/expert_usage/nano",
-            "train/ema/expert_usage/small",
-            "train/ema/expert_usage/large"]
+    keys = ["train/ema/expert_usage/nano", "train/ema/expert_usage/small", "train/ema/expert_usage/large"]
     df = run.history(keys=keys, samples=300, pandas=True).dropna()
 
     s = df["_step"].to_numpy()
@@ -53,10 +51,26 @@ def main() -> int:
     ax.axvspan(0, 1500, alpha=0.07, color=C.LARGE, zorder=0)
     ax.axvspan(3000, max(s[-1], 12000), alpha=0.07, color=C.SMALL, zorder=0)
     # Place region labels in the upper area where there is no line overlap.
-    ax.text(750, 1.07, "cold large transiently dominates",
-            fontsize=8.5, color=C.LARGE, ha="center", va="bottom", fontweight="bold")
-    ax.text(7500, 1.07, "stable heterogeneous routing",
-            fontsize=8.5, color=C.SMALL, ha="center", va="bottom", fontweight="bold")
+    ax.text(
+        750,
+        1.07,
+        "cold large transiently dominates",
+        fontsize=8.5,
+        color=C.LARGE,
+        ha="center",
+        va="bottom",
+        fontweight="bold",
+    )
+    ax.text(
+        7500,
+        1.07,
+        "stable heterogeneous routing",
+        fontsize=8.5,
+        color=C.SMALL,
+        ha="center",
+        va="bottom",
+        fontweight="bold",
+    )
     ax.legend(loc="center right", framealpha=0.95, fontsize=9, bbox_to_anchor=(0.98, 0.55))
 
     ax.set_xlabel("Training step")

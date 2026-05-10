@@ -7,7 +7,7 @@ not clutter the report body itself.
 All test-set numbers use the locked `dense-v1` test split (32,768 samples
 per profile).
 
-## Section 3 — Training Recipe
+## Section 3 - Training Recipe
 
 | Claim in report | Source (W&B / file) |
 |---|---|
@@ -19,21 +19,21 @@ per profile).
 | Routing-trajectory 8-mechanism figure | `docs/figures/routing_trajectories_anti_collapse.png` |
 | Linear-probe figure | `docs/figures/router_mechanism_linear_probing.png` |
 | Large-warmup stabilisation (3-seed collapse) | `experiments/2026-04-26-moe-largewarmup-v1/` |
-| β-warmup stabilisation (mean BLER 0.936±0.043) | `experiments/2026-04-26-moe-betawarmup-v1/` |
-| Alpha sweep test eval — exp24 (α=5e-4) | `002cwsy2` |
-| Alpha sweep test eval — exp25 (α=1e-3) | `5jswm490` (train `3xzxkddv`) |
-| Alpha sweep test eval — exp26 (α=2e-3) | `2zboo1rh` (train `t6lkdep2`) |
-| Alpha sweep test eval — exp27 (α=5e-3) | `dh4x0qmu` |
+| β-warmup stabilisation (inconsistent routing, worse than no-warmup baseline) | `experiments/2026-04-26-moe-betawarmup-v1/` |
+| Alpha sweep test eval - exp24 (α=5e-4) | `002cwsy2` |
+| Alpha sweep test eval - exp25 (α=1e-3) | `5jswm490` (train `3xzxkddv`) |
+| Alpha sweep test eval - exp26 (α=2e-3) | `2zboo1rh` (train `t6lkdep2`) |
+| Alpha sweep test eval - exp27 (α=5e-3) | `dh4x0qmu` |
 | Random-router ablation, BLER 0.968 | `ag3qbw52` (train `cd2w6l31`) |
 | Linear probes R² values | `docs/figures/router_mechanism_linear_probing.json` |
-| Symmetric sweep — cold-small (exp56) | `87yjni5r` |
-| Symmetric sweep — cold-nano (exp57) | `z837iapf` |
-| Multi-seed bimodality — s32 (exp28) collapse | `ywvyzlia` |
-| Multi-seed bimodality — s42 (exp29) reproduction | `121ex9e6` |
+| Symmetric sweep - cold-small (exp56) | `87yjni5r` |
+| Symmetric sweep - cold-nano (exp57) | `z837iapf` |
+| Multi-seed bimodality - s32 (exp28) collapse | `ywvyzlia` |
+| Multi-seed bimodality - s42 (exp29) reproduction | `121ex9e6` |
 | 100k+α=1e-3 recovery (exp60) | `k0tjo3m2` (train `yscpku2h`) |
 | Phase 1 reference (cold-start) | `xdb6fzll` (train `2op33pak`) |
 
-## Section 4 — Training-Scaffold Finding
+## Section 4 - Training-Scaffold Finding
 
 | Claim in report | Source |
 |---|---|
@@ -47,36 +47,37 @@ per profile).
 | Sink + small + large (exp64) | `p0vetpmg` |
 | Sink + nano + large (exp65) | `cia6p3i8` |
 
-## Section 5 — Honest Scope
+## Section 5 - Scope and Discussion
 
 | Claim in report | Source |
 |---|---|
-| LMMSE LS-MRC test BLER + per-SNR | `lmmse_snr20_results.json` (job 19583606) |
-| LMMSE Genie-MRC test BLER | `genie_mrc_eval_results.json` (job 19583116) |
+| LS-MRC test BLER + per-SNR | `lmmse_snr20_results.json` (job 19583606) |
+| Genie-MRC test BLER | `genie_mrc_eval_results.json` (job 19583116) |
 | Single-antenna test BLER | `single_ant_eval_results.json` (job 19583117) |
 | dense_nano test BLER | `bx7hylp6` |
 | dense_small test BLER | `8haq7zuz` |
 | dense_large test BLER | `gpmfhn6k` |
 | Per-SNR TDL-C + UMa waterfall (exp26) | `19583604` snr_binned.table.json (eval46) |
 | Per-SNR TDL-C + UMa waterfall (dense_large) | `19583605` snr_binned.table.json (eval47) |
-| Per-SNR UMa LMMSE LS-MRC | `19583606` run.log (text-format per-SNR table) |
-| 3GPP in-family OOD (TDL-A, TDL-D, CDL-A) — dense_large | `0kyguffw` |
-| 3GPP in-family OOD — exp26 | `h25pbo10` |
-| Neural-vs-LMMSE crosstab | `docs/figures/neural_vs_lmmse_results.json` |
-| DeepMIMO ASU OOD — dense_large zero-shot | `gpmfhn6k` (asu_campus1 fields) |
-| DeepMIMO ASU OOD — exp26 zero-shot | `bpimn1to` |
-| DeepMIMO ASU OOD — dense_large few-shot fine-tune | `t4yo37am` (train `go74dlm7`) |
-| DeepMIMO ASU OOD — exp26 few-shot fine-tune | `kjc12s5p` (train `9t2wyyus`) |
-| LMMSE on DeepMIMO O1 ray-traced (0.976) | `experiments/2026-04-30-deepmimo-o1-ood-v1/` |
+| Per-SNR UMa LS-MRC | `19583606` run.log (text-format per-SNR table) |
+| 3GPP in-family OOD (TDL-A, TDL-D, CDL-A) - dense_large | `0kyguffw` |
+| 3GPP in-family OOD - exp26 | `h25pbo10` |
+| Neural-vs-LS-MRC crosstab | `docs/figures/neural_vs_lmmse_results.json` |
+| DeepMIMO ASU OOD - dense_large zero-shot | `gpmfhn6k` (asu_campus1 fields) |
+| DeepMIMO ASU OOD - exp26 zero-shot | `bpimn1to` |
+| DeepMIMO ASU OOD - dense_large few-shot fine-tune | `t4yo37am` (train `go74dlm7`) |
+| DeepMIMO ASU OOD - exp26 few-shot fine-tune | `kjc12s5p` (train `9t2wyyus`) |
+| LS-MRC on DeepMIMO O1 ray-traced (0.976) | `experiments/2026-04-30-deepmimo-o1-ood-v1/` |
 | SNR-oracle cascade baseline | `experiments/2026-04-26-static-baselines-v1/` + `scripts/analyze_static_baselines.py` |
 | Explicit SNR-input ablation (exp38, collapsed) | `experiments/2026-04-29-moe-snr-input-v1/` |
 | Wall-clock latency benchmark (1.7× slower on real data) | `experiments/2026-04-29-latency-exp26-real-v1/` |
 | PCA OOD overlay figure | cluster job 19654175, `docs/figures/pca_ood_overlay.{pdf,png,npz}`, script `scripts/visualize_ood_pca.py` |
 
-## Section 2 — Architecture
+## Section 2 - Architecture
 
 | Claim | Source |
 |---|---|
 | Total parameter count 582,655 | exp26 W&B summary `model/num_parameters` |
 | FLOPs per expert (320M / 695M / 1604M) | `src/utils/compute.py` formula, verified vs `max_flops` buffer to 0.01% |
 | Dense baseline parameter counts (89,892 / 168,324 / 449,540) | `bx7hylp6` / `8haq7zuz` / `gpmfhn6k` `model/num_parameters` |
+| Dense baseline FLOPs (320M / 599M / 1604M) | same formula with dense configs; `dense_small` uses the actual exp03 `[48, 48]` stem |

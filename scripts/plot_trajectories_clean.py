@@ -20,6 +20,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+
 import wandb
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -60,8 +61,7 @@ def plot_routing(ax, h, title, with_legend=False):
 
     ax.fill_between(s, 0, nano, color=C.NANO, alpha=0.85, label="nano", linewidth=0)
     ax.fill_between(s, nano, nano + small, color=C.SMALL, alpha=0.85, label="small", linewidth=0)
-    ax.fill_between(s, nano + small, nano + small + large, color=C.LARGE,
-                    alpha=0.85, label="large", linewidth=0)
+    ax.fill_between(s, nano + small, nano + small + large, color=C.LARGE, alpha=0.85, label="large", linewidth=0)
 
     ax.set_ylim(0, 1)
     ax.set_xlim(0, 10000)
@@ -70,26 +70,23 @@ def plot_routing(ax, h, title, with_legend=False):
     ax.set_yticks([0.0, 0.5, 1.0])
     ax.grid(True, axis="y")
     if with_legend:
-        ax.legend(loc="upper right", ncol=3, fontsize=8.5,
-                  framealpha=0.95, columnspacing=1.0, handlelength=1.4)
+        ax.legend(loc="upper right", ncol=3, fontsize=8.5, framealpha=0.95, columnspacing=1.0, handlelength=1.4)
 
 
 def plot_entropy(ax, runs):
     colors = {"Phase 1": C.NEUTRAL_GREY, "Phase 2": C.HEADLINE, "Asym warm (exp26)": C.LARGE}
     for h, label in runs:
-        ax.plot(h["steps"], h["train/ema/router_entropy"], label=label,
-                linewidth=1.8, color=colors[label])
-    ax.axhline(np.log(3), color="#888888", linestyle="--", linewidth=0.8,
-               alpha=0.7, label=r"max entropy $\log 3 \approx 1.10$")
+        ax.plot(h["steps"], h["train/ema/router_entropy"], label=label, linewidth=1.8, color=colors[label])
+    ax.axhline(
+        np.log(3), color="#888888", linestyle="--", linewidth=0.8, alpha=0.7, label=r"max entropy $\log 3 \approx 1.10$"
+    )
     ax.set_ylabel("Router entropy (EMA)")
     ax.set_xlabel("Training step")
-    ax.set_title("Router entropy (collapse diagnostic)", fontsize=10,
-                 fontweight="bold", color=C.AXIS_GREY)
+    ax.set_title("Router entropy (collapse diagnostic)", fontsize=10, fontweight="bold", color=C.AXIS_GREY)
     ax.set_ylim(0, 1.2)
     ax.set_xlim(0, 10000)
     ax.grid(True, axis="y")
-    ax.legend(loc="upper right", fontsize=8, framealpha=0.95, ncol=2,
-              bbox_to_anchor=(1.0, 0.55))
+    ax.legend(loc="upper right", fontsize=8, framealpha=0.95, ncol=2, bbox_to_anchor=(1.0, 0.55))
 
 
 def main() -> int:
@@ -101,8 +98,9 @@ def main() -> int:
     p2 = fetch(PHASE2[0])
     asym = fetch(ASYM[0])
 
-    fig, axes = plt.subplots(4, 1, figsize=(7.5, 8.0), sharex=True,
-                              gridspec_kw={"height_ratios": [1, 1, 1, 1.05], "hspace": 0.45})
+    fig, axes = plt.subplots(
+        4, 1, figsize=(7.5, 8.0), sharex=True, gridspec_kw={"height_ratios": [1, 1, 1, 1.05], "hspace": 0.45}
+    )
 
     plot_routing(axes[0], p1, PHASE1[1], with_legend=True)
     plot_routing(axes[1], p2, PHASE2[1])

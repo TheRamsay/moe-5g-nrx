@@ -23,13 +23,14 @@ from typing import Any
 
 import wandb
 
-# Per-expert FLOPs (from CLAUDE.md MoE Architecture table)
-EXPERT_FLOPS = {
-    "nano": 320e6,
-    "small": 695e6,
-    "large": 1604e6,
+# Dense baseline FLOPs under the same multiply-add accounting as src/utils/compute.py.
+# dense_small uses its actual [48, 48] stem from exp03 rather than the wider MoE stem.
+DENSE_FLOPS = {
+    "nano": 320_208_896.0,
+    "small": 598_556_672.0,
+    "large": 1_604_255_744.0,
 }
-DENSE_LARGE_FLOPS = EXPERT_FLOPS["large"]
+DENSE_LARGE_FLOPS = DENSE_FLOPS["large"]
 
 # Source eval runs (W&B run IDs). Use 2026-04-26 reevals which have per-SNR
 # table artifacts (the older 2026-04 evals only have overall scalars).
@@ -99,10 +100,10 @@ def _compute_per_profile_static(
         # ranked cheapest → most expensive
         for name in ("nano", "small", "large"):
             if overall[name] - large_bler < 0.01:  # within 1pp
-                out[profile] = {"expert": name, "bler": overall[name], "flops": EXPERT_FLOPS[name]}
+                out[profile] = {"expert": name, "bler": overall[name], "flops": DENSE_FLOPS[name]}
                 break
         else:
-            out[profile] = {"expert": "large", "bler": overall["large"], "flops": EXPERT_FLOPS["large"]}
+            out[profile] = {"expert": "large", "bler": overall["large"], "flops": DENSE_FLOPS["large"]}
     return out
 
 
@@ -130,7 +131,7 @@ def _compute_snr_oracle_cascade(
                 chosen_per_bin.append((snr, "large", large_bler))
         # uniform-weighted average across bins
         avg_bler = sum(b for _, _, b in chosen_per_bin) / len(chosen_per_bin)
-        avg_flops = sum(EXPERT_FLOPS[e] for _, e, _ in chosen_per_bin) / len(chosen_per_bin)
+        avg_flops = sum(DENSE_FLOPS[e] for _, e, _ in chosen_per_bin) / len(chosen_per_bin)
         result[profile] = {
             "bler": avg_bler,
             "flops": avg_flops,
@@ -202,9 +203,9 @@ def main() -> int:
             {
                 "name": f"Always-{name}",
                 "tdlc_bler": tdlc_bler,
-                "tdlc_flops": EXPERT_FLOPS[name],
+                "tdlc_flops": DENSE_FLOPS[name],
                 "uma_bler": uma_bler,
-                "uma_flops": EXPERT_FLOPS[name],
+                "uma_flops": DENSE_FLOPS[name],
                 "notes": "fixed dense baseline",
             }
         )
