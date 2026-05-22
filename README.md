@@ -10,7 +10,7 @@ FLOPs.
 
 [Final report](projekt.pdf)
 
-![MoE neural receiver architecture](report/obrazky-figures/architecture.png)
+![5G neural receiver pipeline](report/obrazky-figures/final_receiver_pipeline.svg)
 
 ## Summary
 
@@ -72,6 +72,8 @@ The main implementation lives in `src/models/`:
 - `moe.py` - shared-stem MoE receiver, router, Gumbel-softmax training path, and
   top-1 inference path
 - `warm_start.py` - loading dense checkpoints into MoE stem/experts
+
+![Compute-aware MoE architecture](report/obrazky-figures/final_moe_architecture.svg)
 
 The canonical architecture uses:
 
